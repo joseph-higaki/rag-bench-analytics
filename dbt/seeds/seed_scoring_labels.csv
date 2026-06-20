@@ -1,0 +1,7 @@
+scoring,scoring_family,display_label
+string_match,deterministic,Exact string match
+set_match,deterministic,Set membership match
+numerical,deterministic,Numerical equality
+binary,deterministic,Binary yes/no
+boolean,deterministic,Boolean true/false
+semantic,semantic,Semantic similarity (judge model)

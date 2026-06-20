@@ -1,0 +1,8 @@
+version: 2
+
+models:
+  - name: int_scored_answers_enriched
+    description: >
+      Per-answer grain (run x question) joined with question, run, traversal, and the
+      external pricing seed. Ephemeral — exists only to compose the marts. Carries both
+      natural keys (for building dim FKs) and all measures including cost.

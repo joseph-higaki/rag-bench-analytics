@@ -1,0 +1,187 @@
+version: 2
+
+models:
+  # ───────────────────────── FACT (contracted) ─────────────────────────
+  # Contract enforced: the Streamlit dashboard reads this table's Parquet export and
+  # depends on these exact column names/types. A schema drift here should fail the
+  # build, not the dashboard. (Dims use tests rather than enforced contracts — see
+  # the project note: scoping strict contracts to the fact limits unverifiable type
+  # fragility while protecting the surface the dashboard actually binds to.)
+  - name: fct_scored_answer
+    description: One scored answer = run × question. Measures + FKs to all dims, incl. cost.
+    config:
+      contract: {enforced: true}
+    columns:
+      - name: scored_answer_sk
+        data_type: text
+        constraints: [{type: not_null}]
+        tests: [unique]
+      - name: run_id
+        data_type: text
+        constraints: [{type: not_null}]
+      - name: question_id
+        data_type: text
+        constraints: [{type: not_null}]
+      - name: writer_model
+        data_type: text
+      - name: run_sk
+        data_type: text
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_run')
+                field: run_sk
+      - name: question_sk
+        data_type: text
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_question')
+                field: question_sk
+      - name: generator_sk
+        data_type: text
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_generator')
+                field: generator_sk
+      - name: retriever_cond_sk
+        data_type: text
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_retriever_cond')
+                field: retriever_cond_sk
+      - name: judge_sk
+        data_type: text
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_judge')
+                field: judge_sk
+      - name: corpus_sk
+        data_type: text
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_corpus')
+                field: corpus_sk
+      - name: score
+        data_type: numeric
+      - name: passed
+        data_type: boolean
+      - name: judged
+        data_type: boolean
+      - name: is_error
+        data_type: boolean
+      - name: is_pass
+        data_type: integer
+      - name: input_tokens
+        data_type: bigint
+      - name: output_tokens
+        data_type: bigint
+      - name: cache_read_input_tokens
+        data_type: bigint
+      - name: cache_creation_input_tokens
+        data_type: bigint
+      - name: total_tokens
+        data_type: bigint
+      - name: context_tokens_proxy
+        data_type: bigint
+      - name: num_sources
+        data_type: integer
+      - name: retrieval_latency_ms
+        data_type: numeric
+      - name: generation_latency_ms
+        data_type: numeric
+      - name: total_latency_ms
+        data_type: numeric
+      - name: neighborhood_hops
+        data_type: integer
+      - name: num_triples
+        data_type: integer
+      - name: num_linked
+        data_type: integer
+      - name: top_k
+        data_type: integer
+      - name: num_chunks
+        data_type: integer
+      - name: writer_temperature
+        data_type: numeric
+      - name: writer_input_tokens
+        data_type: bigint
+      - name: writer_output_tokens
+        data_type: bigint
+      - name: writer_tokens
+        data_type: bigint
+      - name: sparql_valid
+        data_type: boolean
+      - name: sparql_num_rows
+        data_type: integer
+      - name: generator_cost_usd
+        data_type: numeric
+      - name: writer_cost_usd
+        data_type: numeric
+      - name: total_cost_usd
+        data_type: numeric
+
+  # ───────────────────────── DIMENSIONS ─────────────────────────
+  - name: dim_run
+    description: Run-level descriptive attributes. Grain run_id.
+    columns:
+      - name: run_sk
+        tests: [not_null, unique]
+      - name: run_id
+        tests: [not_null, unique]
+
+  - name: dim_question
+    description: Question attributes. Grain question_id.
+    columns:
+      - name: question_sk
+        tests: [not_null, unique]
+      - name: question_id
+        tests: [not_null, unique]
+      - name: hop_count
+        tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2, 3]
+                quote: false
+
+  - name: dim_generator
+    description: Distinct generator configs (provider × model_resolved × temperature).
+    columns:
+      - name: generator_sk
+        tests: [not_null, unique]
+      - name: generator_provider
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['anthropic', 'ollama']
+
+  - name: dim_retriever_cond
+    description: The compared variable — distinct (retriever, mechanism, neighborhood_hops).
+    columns:
+      - name: retriever_cond_sk
+        tests: [not_null, unique]
+      - name: mechanism
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['dense', 'neighborhood', 'sparqlgen', 'none']
+
+  - name: dim_judge
+    description: Scoring/judge types. Grain scoring.
+    columns:
+      - name: judge_sk
+        tests: [not_null, unique]
+      - name: scoring
+        tests: [not_null, unique]
+
+  - name: dim_corpus
+    description: Corpus build identity. Grain corpus_build_id.
+    columns:
+      - name: corpus_sk
+        tests: [not_null, unique]
+      - name: corpus_build_id
+        tests: [not_null, unique]

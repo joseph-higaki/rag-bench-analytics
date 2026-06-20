@@ -1,0 +1,28 @@
+version: 2
+
+seeds:
+  - name: seed_model_pricing
+    description: >
+      The external cost-per-token table (user-maintained, NOT from the benchmark).
+      Joined on (provider, model_resolved) to compute cost_usd in the fact. Prices are
+      per 1M tokens; keep effective_date current when list prices change. Unmatched
+      models yield NULL cost (acceptable sparsity).
+    columns:
+      - name: model_resolved
+        tests: [not_null, unique]
+      - name: input_usd_per_mtok
+        tests: [not_null]
+      - name: output_usd_per_mtok
+        tests: [not_null]
+
+  - name: seed_retriever_labels
+    description: Conforms each retriever string to a family + display label for dim_retriever_cond.
+    columns:
+      - name: retriever
+        tests: [not_null, unique]
+
+  - name: seed_scoring_labels
+    description: Conforms each scoring type to a family + display label for dim_judge.
+    columns:
+      - name: scoring
+        tests: [not_null, unique]

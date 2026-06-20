@@ -1,0 +1,81 @@
+name: ci
+
+# Proves the SAME models that run locally run in CI, fully on fixtures, no AWS.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv venv --python 3.12
+      - run: uv pip install -e ".[dev]"
+      - name: Lint
+        run: .venv/bin/ruff check ingestion serve dashboard tests
+      - name: Unit tests (no DB)
+        run: .venv/bin/python -m pytest tests/test_storage.py -q
+
+  pipeline:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: analytics
+          POSTGRES_USER: analytics
+          POSTGRES_PASSWORD: analytics
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U analytics" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports: ["9000:9000"]
+        options: >-
+          --health-cmd "mc ready local || curl -fsS http://localhost:9000/minio/health/live"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # Host-side endpoints (service ports are mapped to localhost on the runner).
+      STORAGE_BACKEND: s3
+      S3_ENDPOINT_URL: http://localhost:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+      S3_LANDING_BUCKET: rag-bench-landing
+      S3_MARTS_BUCKET: rag-bench-marts
+      LOCAL_SOURCE_DIR: ./ingestion_sample
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: analytics
+      POSTGRES_USER: analytics
+      POSTGRES_PASSWORD: analytics
+      RAW_SCHEMA: raw
+      DBT_SCHEMA: analytics
+      DBT_TARGET: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv venv --python 3.12
+      - run: uv pip install -e ".[dbt,dev]"
+      - name: dbt profile
+        run: cp dbt/profiles.example.yml dbt/profiles.yml
+      - name: Seed object storage (creates buckets + uploads fixtures)
+        run: .venv/bin/python -m ingestion.seed_storage
+      - name: Extract + load raw
+        run: .venv/bin/python -m ingestion
+      - name: dbt build (run + test + contracts)
+        working-directory: dbt
+        env:
+          DBT_PROFILES_DIR: ${{ github.workspace }}/dbt
+        run: ../.venv/bin/dbt build --target local
+      - name: Idempotency integration test
+        run: .venv/bin/python -m pytest tests/test_load_raw_integration.py -q
+      - name: Export marts to Parquet
+        run: .venv/bin/python -m serve.export_marts

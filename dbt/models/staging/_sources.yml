@@ -1,0 +1,35 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Landing zone written by the Python ingestion layer. JSONB payloads kept as-is
+      from the benchmark's append-only run files. dbt only reads here; never writes.
+    schema: "{{ var('raw_schema') }}"
+    # Freshness on the S3-landed raw: a run that hasn't refreshed in 2 days warns,
+    # 7 days errors. loaded_at is set by the loader, not the benchmark.
+    freshness:
+      warn_after: {count: 2, period: day}
+      error_after: {count: 7, period: day}
+    loaded_at_field: loaded_at
+    tables:
+      - name: run_manifest
+        description: One row per run — run-level metadata (generator, judge, corpus, timestamp).
+        columns:
+          - name: run_id
+            tests: [not_null, unique]
+      - name: scored_answer
+        description: One row per (run, question) — the per-answer record with polymorphic traversal_info.
+        # No freshness here: same loaded_at semantics as run_manifest; checking once is enough.
+        freshness: null
+        columns:
+          - name: run_id
+            tests: [not_null]
+          - name: question_id
+            tests: [not_null]
+      - name: question
+        description: Shared question bank (questions.jsonl), full-refreshed each load.
+        freshness: null
+        columns:
+          - name: question_id
+            tests: [not_null, unique]

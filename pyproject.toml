@@ -1,0 +1,50 @@
+[project]
+name = "rag-bench-analytics"
+version = "0.1.0"
+description = "Analytics consumer for the biomedical-rag-bench benchmark: run files -> raw Postgres -> dbt star schema -> Streamlit."
+requires-python = ">=3.12"
+
+# Pinned in code, not prose (see CLAUDE.md). uv.lock is the source of truth;
+# these are the floor constraints. Keep dbt-core and dbt-postgres in lockstep.
+dependencies = [
+    "boto3==1.40.46",          # S3 / MinIO object storage client (the landing zone)
+    "psycopg[binary]==3.2.10", # raw load into Postgres (psycopg3, binary build = no local libpq)
+    "pyarrow==21.0.0",         # marts -> Parquet export for the serving layer
+    "pandas==2.3.3",           # export + dashboard dataframes
+    "python-dotenv==1.1.1",    # load .env in local dev (never in cloud; env is injected there)
+]
+
+[project.optional-dependencies]
+# Transform engine. Kept separate so the dashboard/runtime image need not carry dbt.
+dbt = [
+    "dbt-core==1.10.13",
+    "dbt-postgres==1.9.0",
+]
+# Serving layer. Streamlit reads marts (Parquet/Postgres) only.
+dashboard = [
+    "streamlit==1.50.0",
+]
+# Orchestration. Pinned to the constraint-file-backed Airflow install (see Makefile).
+airflow = [
+    "apache-airflow==2.10.5",
+    "astronomer-cosmos==1.14.2",
+]
+dev = [
+    "ruff==0.14.0",
+    "pytest==8.4.2",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools]
+# This is a pipeline repo, not a library. Expose the ingestion package only.
+packages = ["ingestion"]

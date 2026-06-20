@@ -1,0 +1,36 @@
+# Secrets & local env
+.env
+*.env
+!.env.example
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+profiles.yml
+!dbt/profiles.example.yml
+
+# Data artifacts (fixtures in ingestion_sample/ ARE committed; everything else is not)
+*.parquet
+exports/
+minio-data/
+postgres-data/
+
+# Terraform
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfvars
+!infra/*.tfvars.example
+
+# Claude Code local settings (personal; the project .claude/CLAUDE.md IS tracked)
+.claude/settings.local.json

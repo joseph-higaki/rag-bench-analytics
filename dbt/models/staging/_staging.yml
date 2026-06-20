@@ -1,0 +1,60 @@
+version: 2
+
+models:
+  - name: stg_runs
+    description: One row per run; flattened manifest metadata.
+    columns:
+      - name: run_id
+        tests: [not_null, unique]
+      - name: generator_provider
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['anthropic', 'ollama']
+
+  - name: stg_scored_answers
+    description: >
+      One row per (run, question); typed per-answer measures. Grain uniqueness is
+      enforced downstream by the unique test on fct_scored_answer's surrogate key.
+    columns:
+      - name: run_id
+        tests: [not_null]
+      - name: question_id
+        tests: [not_null]
+      - name: retriever
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['closed_book', 'vector', 'graph_neighborhood',
+                         'graph_neighborhood_1hop', 'graph_neighborhood_2hop', 'graph_sparqlgen']
+      - name: scoring
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['string_match', 'set_match', 'numerical', 'binary', 'boolean', 'semantic']
+      # score / passed are intentionally NOT not_null: they are null on error records.
+
+  - name: stg_traversal
+    description: Exploded traversal_info, conformed to mechanism-aware columns. One row per (run, question).
+    columns:
+      - name: run_id
+        tests: [not_null]
+      - name: question_id
+        tests: [not_null]
+      - name: mechanism
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['dense', 'neighborhood', 'sparqlgen', 'none']
+
+  - name: stg_questions
+    description: Flattened question bank; hop_count parsed from type_id.
+    columns:
+      - name: question_id
+        tests: [not_null, unique]
+      - name: hop_count
+        tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2, 3]
+                quote: false

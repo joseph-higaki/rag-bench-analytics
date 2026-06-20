@@ -1,0 +1,29 @@
+# Copy to ~/.dbt/profiles.yml (or set DBT_PROFILES_DIR to this dir). Both targets use
+# the SAME models — only connection params differ, sourced from env (CLAUDE.md rule #3).
+# Local and cloud are selected by --target / DBT_TARGET, never by editing model code.
+rag_bench_analytics:
+  target: "{{ env_var('DBT_TARGET', 'local') }}"
+  outputs:
+    # Local: Postgres in docker-compose. Host 'postgres' is the compose service name;
+    # use 'localhost' if running dbt from the host instead of a container.
+    local:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'postgres') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5432') | int }}"
+      dbname: "{{ env_var('POSTGRES_DB', 'analytics') }}"
+      user: "{{ env_var('POSTGRES_USER', 'analytics') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD', 'analytics') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'analytics') }}"
+      threads: 4
+
+    # Cloud: identical model code, RDS endpoint via env. No secrets in this file.
+    cloud:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5432') | int }}"
+      dbname: "{{ env_var('POSTGRES_DB') }}"
+      user: "{{ env_var('POSTGRES_USER') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'analytics') }}"
+      threads: 4
+      sslmode: require

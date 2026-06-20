@@ -1,0 +1,43 @@
+name: rag_bench_analytics
+version: "0.1.0"
+config-version: 2
+
+profile: rag_bench_analytics
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+# The raw schema is owned by the ingestion layer (Python), declared as a source.
+# dbt builds into the analytics schema; layers are materialized per the convention
+# in CLAUDE.md: staging = views (cheap, re-derivable), marts = tables (the dashboard
+# reads these), intermediate = ephemeral (exists only to compose marts).
+models:
+  rag_bench_analytics:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: ephemeral
+    marts:
+      +materialized: table
+      +schema: marts
+
+seeds:
+  rag_bench_analytics:
+    +schema: seeds
+    seed_model_pricing:
+      +column_types:
+        input_usd_per_mtok: numeric
+        output_usd_per_mtok: numeric
+        cache_read_usd_per_mtok: numeric
+        cache_write_usd_per_mtok: numeric
+
+# Surface the raw schema name to sources via a project var, env-overridable so the
+# same models run against any schema the loader wrote to.
+vars:
+  raw_schema: "{{ env_var('RAW_SCHEMA', 'raw') }}"
