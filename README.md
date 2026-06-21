@@ -58,76 +58,107 @@ one. Entity names map to files: `RUN_MANIFEST` = `<run_id>.manifest.json`,
 `SCORED_ANSWER` = `<run_id>.jsonl`, `QUESTION` = `questions.jsonl`.
 
 **Option A — entity-relationship.** `traversal_info` is shown as one wide, sparse entity;
-the note on each attribute marks which `mechanism` populates it (exactly what
-`stg_traversal` flattens it into). ER can't draw subtypes, so the polymorphism is implied
-by the sparsity notes:
+each attribute's note marks which `mechanism` populates it and flags the keys
+`stg_traversal` drops (`dropped`). ER can't draw subtypes, so the polymorphism lives in
+those notes:
 
 ```mermaid
 erDiagram
-    RUN_MANIFEST ||--o{ SCORED_ANSWER : "run_id"
+    RUN_MANIFEST ||--o{ SCORED_ANSWER : "run_id (file)"
     QUESTION ||--o{ SCORED_ANSWER : "question_id"
-    SCORED_ANSWER ||--|| TRAVERSAL_INFO : "embedded 1:1"
+    SCORED_ANSWER ||--o| TRAVERSAL_INFO : "embedded, sparse"
 
     RUN_MANIFEST {
-        text run_id PK
-        timestamptz timestamp
+        text run_id PK "from filename"
+        text timestamp
         text retriever
         text generator_provider
-        text generator_model_resolved
-        numeric generator_temperature
+        text generator_model
+        text generator_model_resolved "sparse"
+        numeric generator_temperature "sparse"
         text judge
-        text corpus_build_id
+        text corpus_build_id "sparse"
         text harness_version
-        int num_questions
+        text questions_path
+        bigint num_questions
+        text system_prompt_sha256
     }
     SCORED_ANSWER {
-        text run_id FK
+        text run_id FK "from filename"
         text question_id FK
+        text type_id
+        text question
+        text predicted
+        text ground_truth "scalar"
         text retriever
         text scoring
+        text generator_provider
+        text generator_model
+        text generator_model_resolved "sparse"
+        numeric generator_temperature "sparse"
         numeric score
         boolean passed
         boolean judged
         text verdict
-        text error
+        object judge_details
+        text error "sparse"
         bigint input_tokens
         bigint output_tokens
-        bigint cache_read_input_tokens
-        bigint cache_creation_input_tokens
-        int num_sources
+        bigint cache_read_input_tokens "sparse"
+        bigint cache_creation_input_tokens "sparse"
+        bigint context_tokens_proxy
+        bigint num_sources
         numeric retrieval_latency_ms
         numeric generation_latency_ms
-        array sources
         object traversal_info
     }
     QUESTION {
         text question_id PK
         text type_id
         text template_id
+        text question
         text scoring
         text answer_var
+        array ground_truth "array"
+        text ground_truth_query
         array seeds
-        json ground_truth
+        text sampling_seed
     }
     TRAVERSAL_INFO {
-        text mechanism "dense neighborhood sparqlgen none"
-        int top_k "dense"
-        int num_chunks "dense"
+        text mechanism "all"
+        text context_tokenizer "all"
+        text retriever "echo"
+        text store "dense"
+        text collection "dense"
         text embed_model "dense"
-        int hops "neighborhood"
-        int num_triples "neighborhood"
-        int num_linked "neighborhood"
+        bigint top_k "dense"
+        bigint num_chunks "dense"
+        array cosine_distances "dense, dropped"
+        array pmids "dense, dropped"
+        bigint hops "neighborhood"
+        bigint max_per_predicate "neighborhood, dropped"
+        bigint max_triples "neighborhood, dropped"
+        object linked_entities "neighborhood, dropped"
+        bigint num_linked "neighborhood"
+        bigint num_triples "neighborhood"
+        array sparql "graph, dropped"
+        text endpoint "graph"
         text writer_model "sparqlgen"
+        numeric writer_temperature "sparqlgen"
         bigint writer_input_tokens "sparqlgen"
         bigint writer_output_tokens "sparqlgen"
         boolean sparql_valid "sparqlgen"
-        int num_rows "sparqlgen"
+        bigint num_rows "sparqlgen"
+        text sparql_generated "sparqlgen, dropped"
+        text writer_reply_raw "sparqlgen, dropped"
+        text sparql_error "sparqlgen, dropped"
     }
 ```
 
-**Option B — class / inheritance.** `traversal_info` is a base type with one subtype per
-`mechanism` — closer to how the JSON actually varies on disk (schema-on-read), at the cost
-of a busier diagram:
+**Option B — class / inheritance.** `traversal_info` is a base type specialized per
+`mechanism`: `dense` and `none` extend it directly, while `neighborhood` and `sparqlgen`
+share a `graph_base` subtype (both query a SPARQL `endpoint`). Closer to how the JSON
+varies on disk (schema-on-read), at the cost of a busier diagram:
 
 ```mermaid
 classDiagram
@@ -136,7 +167,7 @@ classDiagram
     class RunManifest["run_id.manifest.json"] {
         <<one per run>>
         text run_id
-        timestamptz timestamp
+        text timestamp
         text retriever
         text generator_provider
         text generator_model
@@ -145,28 +176,39 @@ classDiagram
         text judge
         text corpus_build_id
         text harness_version
-        int num_questions
+        text questions_path
+        bigint num_questions
+        text system_prompt_sha256
     }
 
     class ScoredAnswer["run_id.jsonl"] {
         <<one line per run x question>>
         text run_id
         text question_id
+        text type_id
+        text question
+        text predicted
+        text ground_truth
         text retriever
         text scoring
+        text generator_provider
+        text generator_model
+        text generator_model_resolved
+        numeric generator_temperature
         numeric score
         boolean passed
         boolean judged
         text verdict
+        object judge_details
         text error
         bigint input_tokens
         bigint output_tokens
         bigint cache_read_input_tokens
         bigint cache_creation_input_tokens
-        int num_sources
+        bigint context_tokens_proxy
+        bigint num_sources
         numeric retrieval_latency_ms
         numeric generation_latency_ms
-        array sources
     }
 
     class Question["questions.jsonl"] {
@@ -174,36 +216,56 @@ classDiagram
         text question_id
         text type_id
         text template_id
+        text question
         text scoring
         text answer_var
+        array ground_truth
+        text ground_truth_query
         array seeds
-        json ground_truth
+        text sampling_seed
     }
 
     class TraversalInfo["traversal_info (embedded)"] {
         <<schema-on-read>>
         text mechanism
+        text context_tokenizer
+        text retriever
     }
     class dense {
         <<retriever vector>>
-        int top_k
-        int num_chunks
+        text store
+        text collection
         text embed_model
+        bigint top_k
+        bigint num_chunks
+        array cosine_distances
+        array pmids
+    }
+    class graph_base {
+        <<neighborhood + sparqlgen>>
+        array sparql
+        text endpoint
     }
     class neighborhood {
         <<retriever graph_neighborhood>>
-        int hops
-        int num_triples
-        int num_linked
+        bigint hops
+        bigint max_per_predicate
+        bigint max_triples
+        object linked_entities
+        bigint num_linked
+        bigint num_triples
     }
     class sparqlgen {
         <<retriever graph_sparqlgen>>
         text writer_model
+        numeric writer_temperature
         bigint writer_input_tokens
         bigint writer_output_tokens
-        text sparql
         boolean sparql_valid
-        int num_rows
+        bigint num_rows
+        text sparql_generated
+        text writer_reply_raw
+        text sparql_error
     }
     class none {
         <<retriever closed_book>>
@@ -214,9 +276,10 @@ classDiagram
     ScoredAnswer "N" --> "1" Question : question_id
     ScoredAnswer *-- TraversalInfo : traversal_info
     TraversalInfo <|-- dense
-    TraversalInfo <|-- neighborhood
-    TraversalInfo <|-- sparqlgen
+    TraversalInfo <|-- graph_base
     TraversalInfo <|-- none
+    graph_base <|-- neighborhood
+    graph_base <|-- sparqlgen
 ```
 
 ## The star schema
@@ -224,8 +287,9 @@ classDiagram
 Grain of the fact: **one scored answer = run × question × retriever condition.**
 
 Six conformed dimensions around one fact. FKs are hashed surrogate keys computed with the
-*same* column lists in fact and dim, so they join exactly. Measures are abridged here; the
-full contracted column list is in `dbt/models/marts/_marts.yml`.
+*same* column lists in fact and dim, so they join exactly. Every fact column is shown; the
+contract that enforces their types is `dbt/models/marts/_marts.yml`. `sparse` marks columns
+that are null where a mechanism doesn't produce them.
 
 ```mermaid
 erDiagram
@@ -243,20 +307,36 @@ erDiagram
         text writer_model "degenerate"
         text run_sk FK
         text question_sk FK
-        text retriever_cond_sk FK
         text generator_sk FK
+        text retriever_cond_sk FK
         text judge_sk FK
         text corpus_sk FK
         numeric score
         boolean passed
-        integer is_pass
+        boolean judged
         boolean is_error
-        bigint total_tokens
+        integer is_pass
+        bigint input_tokens "generator"
+        bigint output_tokens "generator"
+        bigint total_tokens "generator in+out"
+        bigint cache_read_input_tokens "generator, sparse"
+        bigint cache_creation_input_tokens "generator, sparse"
+        bigint context_tokens_proxy "generator"
+        integer num_sources
+        numeric retrieval_latency_ms
+        numeric generation_latency_ms
         numeric total_latency_ms
         integer neighborhood_hops "sparse"
+        integer num_triples "sparse"
+        integer num_linked "sparse"
+        integer top_k "sparse"
+        integer num_chunks "sparse"
         numeric writer_temperature "sparse"
+        bigint writer_input_tokens "sparse"
+        bigint writer_output_tokens "sparse"
         bigint writer_tokens "sparse"
         boolean sparql_valid "sparse"
+        integer sparql_num_rows "sparse"
         numeric generator_cost_usd
         numeric writer_cost_usd
         numeric total_cost_usd
@@ -268,12 +348,15 @@ erDiagram
         timestamptz run_ts
         text judge
         text harness_version
+        text system_prompt_sha256
     }
     DIM_QUESTION {
         text question_sk PK
         text question_id
         text type_id
         text template_id
+        text scoring
+        text answer_var
         integer hop_count
         integer num_seeds
     }
@@ -289,6 +372,7 @@ erDiagram
     DIM_GENERATOR {
         text generator_sk PK
         text generator_provider
+        text generator_model
         text generator_model_resolved
         numeric generator_temperature
         boolean is_local
@@ -304,6 +388,9 @@ erDiagram
         text corpus_build_id
         text corpus_scale
         text corpus_sha
+        bigint node_count
+        bigint edge_count
+        text ttl_sha256
     }
 ```
 
