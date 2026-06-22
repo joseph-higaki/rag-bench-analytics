@@ -5,7 +5,7 @@ sources:
     description: >
       Landing zone written by the Python ingestion layer. JSONB payloads kept as-is
       from the benchmark's append-only run files. dbt only reads here; never writes.
-    schema: "{{ var('raw_schema') }}"
+    schema: "{{ env_var('RAW_SCHEMA', 'raw') }}"
     # Freshness on the S3-landed raw: a run that hasn't refreshed in 2 days warns,
     # 7 days errors. loaded_at is set by the loader, not the benchmark.
     freshness:

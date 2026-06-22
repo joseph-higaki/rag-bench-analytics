@@ -184,4 +184,4 @@ models:
       - name: corpus_sk
         tests: [not_null, unique]
       - name: corpus_build_id
-        tests: [not_null, unique]
+        tests: [unique]

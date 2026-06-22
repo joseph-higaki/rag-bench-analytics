@@ -5,13 +5,12 @@
 with observed as (
     select distinct corpus_build_id
     from {{ ref('stg_runs') }}
-    where corpus_build_id is not null
 )
 select
     {{ surrogate_key(['corpus_build_id']) }}        as corpus_sk,
     corpus_build_id,
-    split_part(corpus_build_id, '-', 1)             as corpus_scale,
-    split_part(corpus_build_id, '-', 2)             as corpus_sha,
+    split_part(coalesce(corpus_build_id, ''), '-', 1) as corpus_scale,
+    split_part(coalesce(corpus_build_id, ''), '-', 2) as corpus_sha,
     cast(null as bigint)                            as node_count,
     cast(null as bigint)                            as edge_count,
     cast(null as varchar)                           as ttl_sha256

@@ -37,7 +37,3 @@ seeds:
         cache_read_usd_per_mtok: numeric
         cache_write_usd_per_mtok: numeric
 
-# Surface the raw schema name to sources via a project var, env-overridable so the
-# same models run against any schema the loader wrote to.
-vars:
-  raw_schema: "{{ env_var('RAW_SCHEMA', 'raw') }}"
