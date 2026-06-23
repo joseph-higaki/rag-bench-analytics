@@ -53,7 +53,7 @@ tolerates unknown keys; it never assumes a frozen schema.
 
 ### Source contract, visualized
 
-Two renderings of the same three input files — kept side by side for now so we can pick
+Three renderings of the same three input files — kept side by side for now so we can pick
 one. Entity names map to files: `RUN_MANIFEST` = `<run_id>.manifest.json`,
 `SCORED_ANSWER` = `<run_id>.jsonl`, `QUESTION` = `questions.jsonl`.
 
@@ -280,6 +280,142 @@ classDiagram
     TraversalInfo <|-- none
     graph_base <|-- neighborhood
     graph_base <|-- sparqlgen
+```
+
+**Option C — containment diagram + field tables + presence matrix.** Drops the ER entity
+boxes for a containment-only diagram, then carries field detail in tables. The two
+polymorphic objects (`traversal_info`, `judge_details`) get a *presence matrix*: which
+mechanism emits each key (`✓` / `·`) plus a `→ star as` column for where it routes in the
+morph. This expresses the schema-on-read variance ER notation can't, and keeps
+morph-routing in its own column instead of folding it into per-attribute notes.
+
+> **Authoritative contract:** the benchmark's `eval/README.md` + `retrievers/README.md`.
+> The tables and matrix below are *this repo's read* of that contract for the morph (note
+> the `→ star as` column) — a derived view, not the spec.
+
+```mermaid
+classDiagram
+    direction LR
+    class RUN_MANIFEST["run_id.manifest.json"]
+    class SCORED_ANSWER["run_id.jsonl"]
+    class QUESTION["questions.jsonl"]
+    class traversal_info["traversal_info (by mechanism)"]
+    class judge_details["judge_details (by scoring)"]
+
+    RUN_MANIFEST "1" o-- "N" SCORED_ANSWER : run_id
+    QUESTION "1" o-- "N" SCORED_ANSWER : question_id
+    SCORED_ANSWER *-- traversal_info : embedded
+    SCORED_ANSWER *-- judge_details : embedded
+```
+
+**`RUN_MANIFEST`** (`<run_id>.manifest.json`) — one per run
+
+| field | type | notes |
+|---|---|---|
+| `run_id` | text | from filename |
+| `timestamp` | text | ISO-8601 |
+| `retriever` | text | the compared variable |
+| `generator_provider` / `generator_model` | text | |
+| `generator_model_resolved` | text | optional — resolved snapshot id |
+| `generator_temperature` | numeric | optional |
+| `judge` | text | e.g. `deterministic-v1` |
+| `corpus_build_id` | text | optional |
+| `harness_version`, `questions_path`, `num_questions`, `system_prompt_sha256` | text/bigint | |
+
+**`QUESTION`** (`questions.jsonl`) — shared bank
+
+| field | type | notes |
+|---|---|---|
+| `question_id` | text | PK |
+| `type_id`, `template_id`, `question`, `scoring`, `answer_var` | text | |
+| `ground_truth` | **array** | accepted answers — flattened to scalar in the row |
+| `ground_truth_query` | text | the ground-truth `.rq` SPARQL |
+| `seeds` | **array** | anchor entities; `[]` when none |
+| `sampling_seed` | text | |
+
+**`SCORED_ANSWER`** (`<run_id>.jsonl`) — one line per run × question; scalar fields
+
+| field | type | notes |
+|---|---|---|
+| `run_id` / `question_id` | text | FKs |
+| `type_id`, `question`, `predicted`, `retriever`, `scoring` | text | |
+| `ground_truth` | text | **scalar** here (flattened from `QUESTION.ground_truth`) |
+| `generator_provider` / `generator_model` | text | |
+| `generator_model_resolved`, `generator_temperature` | text/numeric | optional |
+| `score`, `passed`, `judged`, `verdict` | numeric/bool/text | |
+| `error` | text | optional — present on error rows |
+| `input_tokens`, `output_tokens`, `context_tokens_proxy`, `num_sources` | bigint | |
+| `cache_read_input_tokens`, `cache_creation_input_tokens` | bigint | optional |
+| `retrieval_latency_ms`, `generation_latency_ms` | numeric | |
+| `traversal_info` | object | polymorphic by mechanism → matrix below |
+| `judge_details` | object | polymorphic by scoring → note below |
+
+**`traversal_info` presence matrix** — which mechanism populates each key, and where it
+lands in the star. `✓` = emitted, `·` = absent.
+
+| key | type | dense | neigh. | sparqlgen | closed_book | → star as |
+|---|---|:-:|:-:|:-:|:-:|---|
+| `mechanism` | text | ✓ | ✓ | ✓ | ✓ ¹ | dim attr |
+| `context_tokenizer` | text | ✓ | ✓ | ✓ | ✓ | dropped |
+| `retriever` | text | · | · | · | ✓ | dropped |
+| `store` | text | ✓ | · | · | · | dropped |
+| `collection` | text | ✓ | · | · | · | dropped |
+| `embed_model` | text | ✓ | · | · | · | dim attr |
+| `top_k` | bigint | ✓ | · | · | · | measure |
+| `num_chunks` | bigint | ✓ | · | · | · | measure |
+| `cosine_distances` | array | ✓ | · | · | · | dropped |
+| `pmids` | array | ✓ | · | · | · | dropped |
+| `hops` | bigint | · | ✓ | · | · | measure |
+| `max_per_predicate` | bigint | · | ✓ ² | · | · | dropped |
+| `max_triples` | bigint | · | ✓ ² | · | · | dropped |
+| `linked_entities` | object | · | ✓ | · | · | dropped |
+| `num_linked` | bigint | · | ✓ | · | · | measure |
+| `num_triples` | bigint | · | ✓ | · | · | measure |
+| `endpoint` | text | · | ✓ | ✓ | · | dropped |
+| `sparql` | array/text | · | ✓ ² | ✓ | · | dropped |
+| `writer_model` | text | · | · | ✓ | · | dim attr / degen. |
+| `writer_temperature` | numeric | · | · | ✓ | · | measure |
+| `writer_input_tokens` | bigint | · | · | ✓ | · | measure |
+| `writer_output_tokens` | bigint | · | · | ✓ | · | measure |
+| `sparql_valid` | bool | · | · | ✓ | · | measure |
+| `num_rows` | bigint | · | · | ✓ | · | measure |
+| `sparql_generated` | text | · | · | ✓ | · | dropped |
+| `writer_reply_raw` | text | · | · | ✓ | · | dropped |
+| `sparql_error` | text | · | · | ✓ ³ | · | dropped |
+
+¹ `closed_book` emits **no** `mechanism` today (`null.py`); staging backfills `none`. A
+pending change request to the benchmark makes it universal at source.
+² `neighborhood` success path only — the honest-miss path (no entity linked) omits these.
+³ `sparqlgen` only when the generated query fails to execute.
+
+**`judge_details`** is the same schema-on-read pattern, keyed by `scoring`: `string_match`
+→ `{expected}`; `semantic` → `{expected, judge_model, judge_temperature, …}`. Kept in raw
+provenance, dropped from the star — left opaque here by the same rule the `→ star as`
+column applies to `traversal_info`.
+
+```jsonc
+// <run_id>.manifest.json
+{ "run_id": "20260608T161819-vector-anthropic", "timestamp": "2026-06-08T16:20:28+0200",
+  "retriever": "vector", "generator_provider": "anthropic", "generator_model": "claude-haiku-4-5",
+  "judge": "deterministic-v1", "num_questions": 52, "harness_version": "harness-v1",
+  "system_prompt_sha256": "96109672bcba1e4c" }   // resolved-id / temperature / corpus optional
+
+// <run_id>.jsonl  (one line; graph_sparqlgen, abridged)
+{ "question_id": "01_0hop_attribute__chromosome_of_gene__00", "scoring": "string_match",
+  "ground_truth": "11", "retriever": "graph_sparqlgen", "predicted": "11",
+  "score": 1.0, "passed": true, "verdict": "value '11' found in answer",
+  "input_tokens": 176, "output_tokens": 5, "context_tokens_proxy": 3, "num_sources": 0,
+  "retrieval_latency_ms": 2526.7, "generation_latency_ms": 1091.8,
+  "traversal_info": { "mechanism": "sparqlgen", "writer_model": "claude-haiku-4-5-20251001",
+    "writer_input_tokens": 568, "writer_output_tokens": 85, "sparql_valid": true,
+    "num_rows": 1, "context_tokenizer": "wordpunct-v1" /* sparql*, writer_reply_raw elided */ },
+  "judge_details": { "expected": "11" } }
+
+// questions.jsonl  (one line)
+{ "question_id": "10_fuzzy_semantic__…__00", "type_id": "10_fuzzy_semantic",
+  "template_id": "anticoagulant_vitamin_k_antagonist_fuzzy", "scoring": "semantic",
+  "answer_var": "compoundLabel", "ground_truth": ["Warfarin"], "seeds": [],
+  "ground_truth_query": "PREFIX db: <…> SELECT ?compound ?compoundLabel WHERE { … }" }
 ```
 
 ## The star schema
