@@ -156,6 +156,13 @@ and exploded numerics → fact measures; `mechanism`/`writer_model` → dim attr
 `sparql` text / `sources` / `endpoint` → kept in raw provenance, **dropped from the
 star**.
 
+Keys: every dim join uses a hashed **surrogate** key (`*_sk`) built from the same column
+list in fact and dim — uniform single-column joins even for composite-key dims. The fact
+carries the surrogate PK (`scored_answer_sk`) + surrogate FKs **only**; natural/business
+keys live in their dimension and are **not copied into the fact** (no degenerate-key
+duplicates; knob columns already in a dim grain — e.g. `top_k`, `neighborhood_hops` — are
+not repeated as fact measures). See ADR-003.
+
 ## dbt conventions
 
 - Naming: `stg_`, `int_`, `fct_`, `dim_`. Sources declared in `schema.yml` with
