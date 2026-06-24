@@ -2,12 +2,10 @@ name: ci
 
 # Proves the SAME models that run locally run in CI, fully on fixtures, no AWS.
 on:
-  # Auto-run disabled temporarily — not all components validated locally yet.
-  # Re-enable by uncommenting these triggers:
-  #   push:
-  #     branches: [main]
-  #   pull_request:
-  workflow_dispatch:   # manual-only for now
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 
 jobs:
   quality:
