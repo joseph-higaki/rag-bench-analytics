@@ -57,7 +57,8 @@ services:
       timeout: 5s
       retries: 10
 
-  # One-shot: create the landing + marts buckets, then exit.
+  # One-shot: create the landing bucket, then exit. (Marts are served direct from
+  # Postgres — no Parquet bucket; ADR-001.)
   minio-init:
     image: minio/mc:RELEASE.2025-04-08T15-39-49Z
     depends_on:
@@ -67,8 +68,7 @@ services:
       /bin/sh -c "
       mc alias set local http://minio:9000 ${AWS_ACCESS_KEY_ID:-minioadmin} ${AWS_SECRET_ACCESS_KEY:-minioadmin} &&
       mc mb -p local/${S3_LANDING_BUCKET:-rag-bench-landing} &&
-      mc mb -p local/${S3_MARTS_BUCKET:-rag-bench-marts} &&
-      echo 'buckets ready'
+      echo 'landing bucket ready'
       "
 
   # ── Airflow (optional): `docker compose --profile airflow up` ──
@@ -83,8 +83,17 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      # Cosmos renders the dbt project at DAG-parse time (`dbt ls`), which blows past the
+      # default 30s import budget on a cold parse — the DAG then fails to load. Raise both
+      # parse timeouts. (Production-grade alternative: pre-generate a dbt manifest + Cosmos
+      # LoadMode.DBT_MANIFEST so dbt isn't run at parse — a later ADR-002 follow-up.)
+      AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "180"
+      AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT: "180"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
         postgresql+psycopg2://${AIRFLOW_DB_USER:-airflow}:${AIRFLOW_DB_PASSWORD:-airflow}@postgres-airflow:5432/${AIRFLOW_DB:-airflow}
+      # Make the mounted `ingestion` package importable from PythonOperator tasks —
+      # Airflow only auto-adds dags/plugins/config to sys.path, not $AIRFLOW_HOME itself.
+      PYTHONPATH: /opt/airflow
       # The pipeline tasks read these to reach the warehouse + object storage.
       STORAGE_BACKEND: s3
       S3_ENDPOINT_URL: http://minio:9000
@@ -97,7 +106,6 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags:ro
       - ./ingestion:/opt/airflow/ingestion:ro
-      - ./serve:/opt/airflow/serve:ro
       - ./dbt:/opt/airflow/dbt              # read-write: dbt writes to target/ and logs/
     # Ensure profiles.yml exists (make setup creates it on the host; this covers
     # the case where someone starts Airflow before running make setup).

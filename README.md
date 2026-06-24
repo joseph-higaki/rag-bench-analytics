@@ -21,9 +21,9 @@ latency, on which question types?*
 
 ```
 S3 / MinIO            ingestion          Postgres (raw)        dbt                          marts          dashboard
-run files       →   extract + load   →   raw.* (JSONB)    →  staging → intermediate → fct/dim   →   Parquet in S3 → Streamlit
- .jsonl  +                                                   (flatten, conform,           (star +        (reads marts
- .manifest.json                                              EXPLODE traversal_info)       cost)          only)
+run files       →   extract + load   →   raw.* (JSONB)    →  staging → intermediate → fct/dim   →   Streamlit (direct,
+ .jsonl  +                                                   (flatten, conform,           (star +        read-only role
+ .manifest.json                                              EXPLODE traversal_info)       cost)          on marts schema)
  questions.jsonl
                                   ── orchestrated by Airflow (optional) ──
 ```
@@ -31,8 +31,10 @@ run files       →   extract + load   →   raw.* (JSONB)    →  staging → i
 - **Extract/Load** (`ingestion/`): pull run files from object storage, land them in a
   `raw` schema as JSONB, as-is. Idempotent, keyed by `run_id`. No transformation.
 - **Transform** (`dbt/`): `staging → intermediate → marts`. The schema morph lives here.
-- **Serve** (`serve/`, `dashboard/`): export marts to Parquet in S3; Streamlit reads the
-  Parquet, never the warehouse.
+- **Serve** (`dashboard/`): Streamlit reads the **marts schema directly** via a
+  least-privilege read-only role (`marts_reader`) — never raw/staging, never as the
+  warehouse owner. (Parquet→S3 for Streamlit Community Cloud is a documented, unbuilt
+  fallback; see ADR-001.)
 - **Orchestrate** (`airflow/`): a DAG runs the same chain. Optional — `make pipeline`
   runs it without Airflow.
 
@@ -385,15 +387,15 @@ The field-level routing:
 
 ```bash
 make setup       # venv + deps + .env + dbt profile
-make pipeline    # up (postgres+minio) → seed → ingest → dbt build → export
-make dashboard   # Streamlit at http://localhost:8501
+make pipeline    # up (postgres+minio) → seed → ingest → dbt build
+make dashboard   # Streamlit at http://localhost:8501 (direct-connect to marts)
 ```
 
 `make pipeline` is the offline reproducibility check: `docker compose` + the committed
 `ingestion_sample/` fixtures run the whole chain with no AWS account.
 
 Useful individual targets: `make up`, `make seed`, `make ingest`, `make dbt`,
-`make export`, `make test`, `make lint`, `make parse`, `make airflow`. Run `make help`.
+`make test`, `make lint`, `make parse`, `make airflow`. Run `make help`.
 
 ## Local vs cloud
 
@@ -406,22 +408,22 @@ the cost discipline behind each component (notably: **no MWAA**, **no Aurora**).
 
 `.github/workflows/ci.yml` runs the **same models** end-to-end on the fixtures against
 ephemeral Postgres + MinIO service containers: lint → unit tests → seed → ingest →
-`dbt build` (run + tests + contracts) → idempotency test → export. Fully offline, no AWS.
+`dbt build` (run + tests + contracts) → idempotency test. Fully offline, no AWS.
 
 ## Verification status
 
 Validated in this repo: the ingestion logic against all **81 runs / 3,461 records** of
 the real fixtures (including the empty-`traversal_info` and error-row edge cases), the
-unit suite, `ruff`, and `dbt parse` (Jinja/refs/contracts). The full `dbt build` + export
-run against Postgres + MinIO is exercised by `make pipeline` and CI (both require Docker).
+unit suite, `ruff`, and `dbt parse` (Jinja/refs/contracts). The full `dbt build` run
+against Postgres + MinIO — plus the dashboard's direct read-only-role read of the marts
+schema — is exercised by `make pipeline` and CI (both require Docker).
 
 ## Repo layout
 
 ```
 ingestion/   EL: object storage -> raw Postgres (storage interface: local | s3)
 dbt/         staging (flatten + EXPLODE) → intermediate (join + cost) → marts (star)
-serve/       marts -> Parquet export
-dashboard/   Streamlit (reads marts Parquet only)
+dashboard/   Streamlit (reads the marts schema directly, read-only role)
 airflow/     optional orchestration DAG
 infra/       cheapest-viable AWS (terraform)
 tests/       pytest for ingestion

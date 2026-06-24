@@ -8,9 +8,8 @@ not auto-provisioned, to keep the module small and honest about what's been test
 | Resource | Why (one sentence) |
 |---|---|
 | S3 `…-landing` | Object-storage landing zone for `run.json`/`.jsonl` + manifests (the producer/consumer boundary). |
-| S3 `…-marts`   | Parquet marts the dashboard reads — no live DB connection from the internet. |
-| RDS `db.t4g.micro` Postgres | The warehouse; free-tier eligible year 1, single-AZ — **not** Aurora. |
-| Security group | Scopes Postgres to the compute SG only; the dashboard never reaches the DB. |
+| RDS `db.t4g.micro` Postgres | The warehouse; free-tier eligible year 1, single-AZ — **not** Aurora. (ADR-001 makes self-hosted Postgres-on-EC2 the primary; RDS is the low-ops fallback.) |
+| Security group | Scopes Postgres to the compute SG + the in-VPC dashboard SG (read-only marts, ADR-001); no public ingress. |
 
 ```bash
 export TF_VAR_db_password=...        # from a secrets backend, never committed
@@ -25,7 +24,6 @@ export DBT_TARGET=cloud
 export POSTGRES_HOST=$(terraform output -raw warehouse_endpoint | sed 's/:5432//')
 export S3_ENDPOINT_URL=                # unset => real AWS S3
 export S3_LANDING_BUCKET=$(terraform output -raw landing_bucket)
-export S3_MARTS_BUCKET=$(terraform output -raw marts_bucket)
 ```
 
 The **same dbt models** run; only the target + env change (CLAUDE.md rule #3).
@@ -34,8 +32,10 @@ The **same dbt models** run; only the target + env change (CLAUDE.md rule #3).
 
 - **Orchestration:** self-host Airflow on a single `t4g.small` (EC2 or ECS Fargate).
   **Do NOT use MWAA** (~$350/mo floor). At this cadence a scheduled Fargate task or
-  cron running `make ingest && make dbt && make export` replaces Airflow entirely —
-  Airflow is kept locally for the skill, not because the cadence needs it.
-- **Dashboard:** Streamlit Community Cloud (free), reading the marts Parquet from S3.
+  cron running `make ingest && make dbt` replaces Airflow entirely — Airflow is kept
+  locally for the skill, not because the cadence needs it.
+- **Dashboard:** self-hosted Streamlit in-VPC, connecting direct to the marts schema via
+  a read-only role (ADR-001 primary). Streamlit Community Cloud reading Parquet exported
+  to S3 is the documented fallback — not built (it would re-add an exporter).
 - **Tear-down friendliness:** S3 + a stopped/`t4g.micro` RDS cost ~zero idle; destroy
   the RDS instance between demos and re-`apply` when needed.

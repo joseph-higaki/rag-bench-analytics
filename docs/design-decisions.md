@@ -410,13 +410,13 @@ Grouped by the convention rule each one serves.
 - The fact's **enforced contract** (`_marts.yml`, `contract.enforced`) changes substantially:
   ~14 column renames, drops (`top_k`, `writer_model`, `writer_temperature`,
   `is_pass`), and adds (`writer_sk`, plus FK rename `judge_sk`→`scoring_sk`). `dbt build`
-  fails until the contract matches (the intended guardrail). Every downstream consumer
-  (dashboard bindings, Parquet) updates in lockstep.
+  fails until the contract matches (the intended guardrail). The downstream consumer
+  (the dashboard's direct-read column bindings) updates in lockstep.
 - **`retriever_cond_sk` grain expands** (`+top_k`) — the **identical**
   `surrogate_key([...])` list must appear in both `fct` and `dim_retriever_cond` or the
-  relationship test breaks. Full rebuild; **all sk values change**; cached Parquet invalidated.
+  relationship test breaks. Full rebuild; **all sk values change**.
 - **`generator_sk` re-keys on `generator_model_id`** (coalesced, derived in staging) in both
-  `fct` and `dim_generator` → `generator_sk` values change; same rebuild/Parquet caveat as above.
+  `fct` and `dim_generator` → `generator_sk` values change; same full-rebuild caveat as above.
 - The fact becomes **surrogate-keys-only**: it sheds `run_id`, `question_id`, `neighborhood_hops`
   (plus `writer_model`/`top_k`/`writer_temperature`/`is_pass` from earlier groups). Any query
   filtering the fact directly on `run_id`/`hops` must now join the relevant dim.
@@ -510,8 +510,31 @@ correct dependency edges.
 
 ## ADR-001 — Self-hosted warehouse + dashboard, direct connection (supersedes the RDS / Community-Cloud defaults)
 
-- **Status:** Accepted — implementation deferred to a later batch.
-- **Date:** 2026-06-19
+- **Status:** Accepted — **local serving half implemented 2026-06-25** (direct-connect
+  dashboard + read-only role; Parquet export removed). Cloud infra (RDS→EC2 container,
+  security groups, in-VPC topology) still deferred to the cloud milestone.
+- **Date:** 2026-06-19 (amended 2026-06-25)
+
+### Amendment (2026-06-25) — export removed entirely, not gated behind a swap point
+
+Decisions #3/#4 below kept Parquet/S3 export as an *optional* serving path behind a
+`SERVE_MODE=postgres|parquet` swap point. **Superseded:** the export path is **removed
+outright** — `serve/export_marts.py`, the `make export` target, the Airflow `export_marts`
+task, the CI export step, the marts S3 bucket (compose `minio-init`, `seed_storage`,
+`StorageConfig`, Terraform), and the `S3_MARTS_*` env are all deleted. Rationale: the user
+does not want an intermediate Parquet stage as a validation point, and a `SERVE_MODE` switch
+with only one live implementation is dead code carrying false optionality. Streamlit-
+Community-Cloud-from-Parquet stays a **documented, re-addable** fallback (it would
+reintroduce an exporter + a `parquet` reader), but is no longer maintained code.
+
+Implemented this batch: the dashboard (`dashboard/app.py`) reads `<DBT_SCHEMA>_marts`
+directly as a least-privilege `marts_reader` role, provisioned idempotently by a dbt
+`on-run-end` hook (`dbt/macros/grant_marts_reader.sql`) — re-applied each build because
+marts are `table`-materialized (dropped/recreated). Verified: `make pipeline` green
+(PASS=71 incl. the grant hook); `marts_reader` reads marts but is denied on raw/staging and
+on writes. Still deferred (cloud milestone): the RDS→EC2 container swap, security groups,
+and the in-VPC topology; the optional `streamlit` compose service (local uses host-run
+`make dashboard`).
 
 ### Context
 
@@ -565,24 +588,25 @@ the Parquet handoff: the dashboard can reach the warehouse privately over the ne
 
 ### Implementation checklist (for the execution batch)
 
-- [ ] `dashboard/app.py`: add the `load_mart` swap point (`SERVE_MODE=postgres|parquet`);
-      add a `psycopg` reader that selects from the `*_marts` schema.
-- [ ] `.env.example`: add `SERVE_MODE` (default `postgres`) and the dashboard's read-only
-      DB creds + marts schema name.
-- [ ] dbt / SQL: create a **read-only role** for the dashboard with `SELECT` on the marts
-      schema only (least privilege); optionally expose read-only views.
-- [ ] `docker-compose.yml`: add a `streamlit` service (dev) connecting directly to
-      `postgres`; keep the export path optional.
-- [ ] `infra/`: replace/supplement the RDS resource with **EC2 + containerized Postgres**
-      + security groups — DB SG allows the app SG only; app SG exposes the dashboard port
-      to an IP allowlist or an ALB (with auth). Keep the S3 marts bucket only if retaining
-      the Parquet fallback.
-- [ ] `.claude/CLAUDE.md`: update **Environments** + **Cost discipline** to make
-      self-hosted Postgres-on-EC2 + in-VPC direct-connect Streamlit the primary path, and
-      demote RDS / Community-Cloud / Parquet to documented alternatives (standing context
-      must not contradict this ADR).
-- [ ] `README.md`: update the architecture/serving narrative and the cost wording.
-- [ ] `Makefile`: note dev (`make dashboard` direct-connect) vs staging/prod run modes.
+_Done 2026-06-25 (local serving half) — see the Amendment:_
+- [x] `dashboard/app.py`: `load_mart` reads `<DBT_SCHEMA>_marts` directly via `psycopg`.
+      (No `SERVE_MODE` switch — direct-only; the parquet branch was the dropped option.)
+- [x] `.env.example`: dashboard read-only creds (`MARTS_READER_USER/PASSWORD`); marts schema
+      derived from `DBT_SCHEMA`. (No `SERVE_MODE` — only one serving path now.)
+- [x] dbt / SQL: **read-only role** `marts_reader`, `SELECT` on the marts schema only,
+      provisioned by the `grant_marts_reader` on-run-end hook (least privilege).
+- [x] `.claude/CLAUDE.md`: Environments + Cost + rule #2 make direct-connect the primary
+      path; Parquet/Community-Cloud demoted to a documented (unbuilt) fallback.
+- [x] `README.md`: architecture/serving narrative + cost wording updated.
+- [x] `Makefile`: `make dashboard` is direct-connect; `export` target removed.
+
+_Deferred to the cloud milestone:_
+- [ ] `docker-compose.yml`: optional `streamlit` service (dev). Local uses host-run
+      `make dashboard` — not blocking.
+- [ ] `infra/`: replace the RDS resource with **EC2 + containerized Postgres** + security
+      groups — DB SG allows the app SG + the in-VPC dashboard SG only; app SG exposes the
+      dashboard port to an IP allowlist or an authenticated ALB. (Marts S3 bucket already
+      removed — no Parquet fallback to retain.)
 
 ### Security note
 

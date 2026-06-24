@@ -2,8 +2,8 @@ version: 2
 
 models:
   # ───────────────────────── FACT (contracted) ─────────────────────────
-  # Contract enforced: the Streamlit dashboard reads this table's Parquet export and
-  # depends on these exact column names/types. A schema drift here should fail the
+  # Contract enforced: the Streamlit dashboard reads this table directly (read-only role)
+  # and depends on these exact column names/types. A schema drift here should fail the
   # build, not the dashboard. (Dims use tests rather than enforced contracts — see
   # the project note: scoping strict contracts to the fact limits unverifiable type
   # fragility while protecting the surface the dashboard actually binds to.)

@@ -12,6 +12,11 @@ test-paths: ["tests"]
 target-path: "target"
 clean-targets: ["target", "dbt_packages"]
 
+# After every build, (re)grant the dashboard's read-only role on the marts schema.
+# Idempotent + re-applied each run because marts are dropped/recreated (see the macro).
+on-run-end:
+  - "{{ grant_marts_reader() }}"
+
 # The raw schema is owned by the ingestion layer (Python), declared as a source.
 # dbt builds into the analytics schema; layers are materialized per the convention
 # in CLAUDE.md: staging = views (cheap, re-derivable), marts = tables (the dashboard

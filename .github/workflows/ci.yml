@@ -18,7 +18,7 @@ jobs:
       - run: uv venv --python 3.12
       - run: uv pip install -e ".[dev]"
       - name: Lint
-        run: .venv/bin/ruff check ingestion serve dashboard tests
+        run: .venv/bin/ruff check ingestion dashboard tests
       - name: Unit tests (no DB)
         run: .venv/bin/python -m pytest tests/test_storage.py -q
 
@@ -52,7 +52,6 @@ jobs:
       AWS_SECRET_ACCESS_KEY: minioadmin
       AWS_REGION: us-east-1
       S3_LANDING_BUCKET: rag-bench-landing
-      S3_MARTS_BUCKET: rag-bench-marts
       LOCAL_SOURCE_DIR: ./ingestion_sample
       POSTGRES_HOST: localhost
       POSTGRES_PORT: "5432"
@@ -80,5 +79,3 @@ jobs:
         run: ../.venv/bin/dbt build --target local
       - name: Idempotency integration test
         run: .venv/bin/python -m pytest tests/test_load_raw_integration.py -q
-      - name: Export marts to Parquet
-        run: .venv/bin/python -m serve.export_marts

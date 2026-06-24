@@ -1,31 +1,38 @@
-"""Streamlit dashboard — reads marts Parquet from object storage ONLY (CLAUDE.md rule #2).
+"""Streamlit dashboard — reads the marts schema directly via a read-only role (rule #2).
 
-Never connects to the warehouse. In local dev it reads from MinIO; in cloud, from the
-same Parquet exported to S3 (Streamlit Community Cloud, free). The analytic story: the
-generator is fixed per run, ground truth is graph traversal — so the compared variable
-is the RETRIEVER. Every view slices outcomes/cost/latency by retriever condition.
+Connects to <DBT_SCHEMA>_marts over a least-privilege `marts_reader` role (ADR-001),
+never raw/staging and never as the analytics owner. The analytic story: the generator is
+fixed per run, ground truth is graph traversal — so the compared variable is the
+RETRIEVER. Every view slices outcomes/cost/latency by retriever condition.
 """
 
 from __future__ import annotations
 
-import io
 import os
 
-import boto3
 import pandas as pd
+import psycopg
 import streamlit as st
+
+MARTS_SCHEMA = f"{os.environ.get('DBT_SCHEMA', 'analytics')}_marts"
+
+
+def _marts_conn() -> psycopg.Connection:
+    """Open a read-only connection to the marts schema (the `marts_reader` role)."""
+    return psycopg.connect(
+        host=os.environ.get("POSTGRES_HOST", "localhost"),
+        port=int(os.environ.get("POSTGRES_PORT", "5432")),
+        dbname=os.environ.get("POSTGRES_DB", "analytics"),
+        user=os.environ.get("MARTS_READER_USER", "marts_reader"),
+        password=os.environ.get("MARTS_READER_PASSWORD", "marts_reader"),
+    )
 
 
 @st.cache_data(ttl=300)
 def load_mart(table: str) -> pd.DataFrame:
-    """Download one marts Parquet object and return it as a DataFrame."""
-    endpoint = os.environ.get("S3_ENDPOINT_URL") or None
-    bucket = os.environ.get("S3_MARTS_BUCKET", "rag-bench-marts")
-    prefix = os.environ.get("S3_MARTS_PREFIX", "marts/").rstrip("/")
-    region = os.environ.get("AWS_REGION", "us-east-1")
-    s3 = boto3.client("s3", endpoint_url=endpoint, region_name=region)
-    obj = s3.get_object(Bucket=bucket, Key=f"{prefix}/{table}.parquet")
-    return pd.read_parquet(io.BytesIO(obj["Body"].read()))
+    """Read one marts table into a DataFrame (read-only role, marts schema only)."""
+    with _marts_conn() as conn:
+        return pd.read_sql(f'select * from "{MARTS_SCHEMA}"."{table}"', conn)
 
 
 def main() -> None:
