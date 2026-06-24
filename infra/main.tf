@@ -19,8 +19,9 @@ provider "aws" {
   region = var.aws_region
 }
 
-# S3 — the landing zone + marts. Cheapest durable object storage; the whole point of the
+# S3 — the landing zone. Cheapest durable object storage; the whole point of the
 # producer/consumer boundary. Versioning on landing so an accidental overwrite is recoverable.
+# (No marts bucket: the dashboard reads the marts schema direct from Postgres — ADR-001.)
 resource "aws_s3_bucket" "landing" {
   bucket = "${var.project}-landing-${var.suffix}"
 }
@@ -29,14 +30,6 @@ resource "aws_s3_bucket_versioning" "landing" {
   bucket = aws_s3_bucket.landing.id
   versioning_configuration { status = "Enabled" }
 }
-
-resource "aws_s3_bucket" "marts" {
-  bucket = "${var.project}-marts-${var.suffix}"
-}
-
-# The dashboard reads marts Parquet over public-read object URLs from Streamlit Community
-# Cloud — keep this bucket's policy as narrow as your sharing model allows. Left default-
-# private here; open specific objects/prefixes deliberately rather than the whole bucket.
 
 # RDS Postgres — t4g.micro (free-tier eligible yr 1). The warehouse. Do NOT reach for
 # Aurora (CLAUDE.md). Single-AZ, minimal storage; this is a low-frequency analytics DB.
@@ -59,9 +52,10 @@ resource "aws_db_instance" "warehouse" {
 
 resource "aws_security_group" "warehouse" {
   name        = "${var.project}-pg-sg"
-  description = "Postgres access for the analytics pipeline compute only"
-  # Ingress intentionally omitted here: add a rule scoped to the compute SG (Airflow
-  # host / Fargate task), never 0.0.0.0/0. The dashboard never reaches the DB.
+  description = "Postgres access for the analytics pipeline compute + in-VPC dashboard"
+  # Ingress intentionally omitted here: add rules scoped to the compute SG (Airflow host /
+  # Fargate task) AND the in-VPC dashboard SG (read-only marts, ADR-001), never 0.0.0.0/0.
+  # The full direct-connect topology (and RDS->EC2 container swap) is the cloud milestone.
   egress {
     from_port   = 0
     to_port     = 0

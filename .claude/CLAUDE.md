@@ -28,7 +28,8 @@ Producer → consumer boundary (do not blur it):
    benchmark.** The staging layer must *validate* it and *tolerate unknown keys*.
    Never assume a frozen schema; never edit source files.
 2. **Streamlit reads marts only**, never raw or intermediate tables — via a read-only
-   role on the marts schema (direct SQL), or the optional Parquet export.
+   role (`marts_reader`) on the marts schema (direct SQL). Parquet export is a documented,
+   *unbuilt* Community-Cloud fallback (ADR-001 amended 2026-06-25), not a live path.
 3. **Same dbt models everywhere.** Local vs cloud differ only by dbt *target* and
    environment variables — not by separate model code.
 4. **Local must run fully offline and reproducibly**: `docker compose up` + sample
@@ -46,8 +47,8 @@ Producer → consumer boundary (do not blur it):
 
 ```
 S3 / MinIO            ingestion            Postgres (raw)        dbt                      marts            dashboard
-run.json        →   extract + load    →   raw.* (json/text)  →  staging → intermediate → fct/dim   →   Streamlit (direct, in-VPC)
-questions.jsonl                                                  (flatten, conform,        (star)        └ Parquet→S3 optional fallback
+run.json        →   extract + load    →   raw.* (json/text)  →  staging → intermediate → fct/dim   →   Streamlit (direct, in-VPC,
+questions.jsonl                                                  (flatten, conform,        (star)                    read-only role)
 corpus_profile                                                   explode traversal_info)
                                   ── orchestrated by Airflow ──
 ```
@@ -57,10 +58,9 @@ corpus_profile                                                   explode travers
 - **Transform (dbt):** staging → intermediate → marts. This is where the schema
   morph happens.
 - **Serve:** self-hosted Streamlit reads the **marts schema directly** (in-VPC,
-  read-only role). Exporting marts to Parquet in S3 is an *optional* fallback (e.g.
-  for Streamlit Community Cloud). See ADR-001.
-- **Orchestrate:** Airflow DAG runs extract → load → `dbt build` → (optional) export →
-  cache refresh.
+  read-only role `marts_reader`). Parquet→S3 for Streamlit Community Cloud is a
+  *documented, unbuilt* fallback (would re-add an exporter). See ADR-001 (amended 2026-06-25).
+- **Orchestrate:** Airflow DAG runs extract → load → `dbt build`.
 
 ## Repo structure
 
@@ -92,7 +92,7 @@ rag-bench-analytics/
 │   └── dags/
 │       └── analytics_pipeline.py
 ├── dashboard/
-│   └── app.py                 # Streamlit; reads marts (Parquet/Postgres) only
+│   └── app.py                 # Streamlit; reads the marts schema directly (read-only role)
 ├── infra/                     # IaC for the cheapest-AWS deploy (terraform)
 └── tests/                     # python unit tests for ingestion
 ```
@@ -156,6 +156,13 @@ and exploded numerics → fact measures; `mechanism`/`writer_model` → dim attr
 `sparql` text / `sources` / `endpoint` → kept in raw provenance, **dropped from the
 star**.
 
+Keys: every dim join uses a hashed **surrogate** key (`*_sk`) built from the same column
+list in fact and dim — uniform single-column joins even for composite-key dims. The fact
+carries the surrogate PK (`scored_answer_sk`) + surrogate FKs **only**; natural/business
+keys live in their dimension and are **not copied into the fact** (no degenerate-key
+duplicates; knob columns already in a dim grain — e.g. `top_k`, `neighborhood_hops` — are
+not repeated as fact measures). See ADR-003.
+
 ## dbt conventions
 
 - Naming: `stg_`, `int_`, `fct_`, `dim_`. Sources declared in `schema.yml` with
@@ -190,9 +197,10 @@ ingress). Same dbt models; the cloud target is selected by env var.
 - **Dashboard** — **self-hosted Streamlit in-VPC** (default, ADR-001), connecting
   directly to the marts via a read-only role; the DB has no public ingress, only the
   dashboard port is exposed (IP allowlist / authenticated ALB). **Streamlit Community
-  Cloud (free) reading Parquet exported to S3** is the documented fallback for when the
-  dashboard can't sit in the VPC. Trade-off: the self-hosted path is not idle-to-zero
-  (the box stays up); accepted because it also hosts the warehouse.
+  Cloud (free) reading Parquet exported to S3** is a *documented, unbuilt* fallback for
+  when the dashboard can't sit in the VPC (re-adding it means restoring an exporter +
+  a parquet reader — ADR-001 amended 2026-06-25). Trade-off: the self-hosted path is not
+  idle-to-zero (the box stays up); accepted because it also hosts the warehouse.
 - Tear-down friendliness: prefer components that scale/cost to ~zero when idle.
 
 ## Commands (Makefile)
@@ -200,9 +208,8 @@ ingress). Same dbt models; the cloud target is selected by env var.
 - `make up` — start the local stack (postgres, airflow, minio).
 - `make seed` — load sample `run.json` fixtures into MinIO.
 - `make ingest` — extract + load raw.
-- `make dbt` — `dbt build` (run + test).
-- `make export` — marts → Parquet in (Min)IO.
-- `make dashboard` — run Streamlit locally.
+- `make dbt` — `dbt build` (run + test; the on-run-end hook (re)grants `marts_reader`).
+- `make dashboard` — run Streamlit locally (direct-connect to marts, read-only role).
 - `make pipeline` — the full chain end to end (the offline reproducibility check).
 
 ## Working agreement for Claude Code

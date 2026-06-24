@@ -1,0 +1,4 @@
+{
+  // dbt-aware editing + run/preview of analyses against the warehouse.
+  "recommendations": ["innoverio.vscode-dbt-power-user"]
+}

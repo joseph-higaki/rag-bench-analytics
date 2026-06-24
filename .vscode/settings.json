@@ -1,0 +1,10 @@
+{
+  // dbt project lives in dbt/, not the repo root — restrict Power User to it.
+  "dbt.allowListFolders": ["dbt"],
+
+  // Power User locates dbt through the Python extension's interpreter (the
+  // recommended path; dbt.dbtPythonPathOverride is discouraged unless using Meltano).
+  // Point at the repo venv so dbt-core 1.10 resolves without manual selection.
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "dbt.perspectiveTheme": "Vintage"
+}

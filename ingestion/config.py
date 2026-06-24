@@ -32,8 +32,6 @@ class StorageConfig:
     region: str
     landing_bucket: str
     landing_prefix: str
-    marts_bucket: str
-    marts_prefix: str
 
     @classmethod
     def from_env(cls) -> StorageConfig:
@@ -49,8 +47,6 @@ class StorageConfig:
             region=os.environ.get("AWS_REGION", "us-east-1"),
             landing_bucket=os.environ.get("S3_LANDING_BUCKET", "rag-bench-landing"),
             landing_prefix=os.environ.get("S3_LANDING_PREFIX", "runs/"),
-            marts_bucket=os.environ.get("S3_MARTS_BUCKET", "rag-bench-marts"),
-            marts_prefix=os.environ.get("S3_MARTS_PREFIX", "marts/"),
         )
 
 

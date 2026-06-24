@@ -45,9 +45,9 @@ def main() -> int:
     s3 = boto3.client(
         "s3", endpoint_url=cfg.endpoint_url, region_name=cfg.region
     )
-    # Ensure buckets exist (idempotent) so CI / fresh MinIO needn't run the mc init job.
-    for bucket in (cfg.landing_bucket, cfg.marts_bucket):
-        _ensure_bucket(s3, bucket, cfg.region)
+    # Ensure the landing bucket exists (idempotent) so CI / fresh MinIO needn't run the
+    # mc init job. (Marts are served direct from Postgres — no marts bucket; ADR-001.)
+    _ensure_bucket(s3, cfg.landing_bucket, cfg.region)
 
     prefix = cfg.landing_prefix.rstrip("/") + "/" if cfg.landing_prefix else ""
     files = sorted(p for p in src.iterdir() if p.is_file())

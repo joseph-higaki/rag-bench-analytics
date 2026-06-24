@@ -1,7 +1,7 @@
-# One-word entrypoints. Host-run tooling (ingest/dbt/export) talks to the compose stack
-# over localhost; the stack itself is `docker compose`. `make pipeline` is the offline
+# One-word entrypoints. Host-run tooling (ingest/dbt) talks to the compose stack over
+# localhost; the stack itself is `docker compose`. `make pipeline` is the offline
 # reproducibility check (CLAUDE.md rule #4).
-.PHONY: help up down logs seed ingest dbt export dashboard pipeline test lint parse setup clean airflow
+.PHONY: help up down logs seed ingest dbt dashboard pipeline test lint parse setup clean airflow
 
 # Load .env if present so every target sees the same config.
 ifneq (,$(wildcard .env))
@@ -42,13 +42,10 @@ ingest:  ## Extract from object storage + load into raw Postgres (idempotent)
 dbt:  ## dbt build = run + test (same models everywhere; target via DBT_TARGET)
 	cd $(DBTDIR) && $(abspath $(DBT)) build --target $${DBT_TARGET:-local}
 
-export:  ## Export marts -> Parquet in (Min)IO
-	$(PY) -m serve.export_marts
-
-dashboard:  ## Run the Streamlit dashboard locally
+dashboard:  ## Run the Streamlit dashboard locally (direct-connect to marts, read-only role)
 	$(VENV)/bin/streamlit run dashboard/app.py
 
-pipeline: up seed ingest dbt export  ## Full chain end-to-end (offline reproducibility check)
+pipeline: up seed ingest dbt  ## Full chain end-to-end (offline reproducibility check)
 	@echo "pipeline complete — run 'make dashboard' to view"
 
 airflow:  ## Start Airflow (optional, profile) at http://localhost:8080
@@ -58,7 +55,7 @@ test:  ## Run python unit tests (DB-integration tests skip without POSTGRES_HOST
 	$(PY) -m pytest -q
 
 lint:  ## Lint python with ruff
-	$(VENV)/bin/ruff check ingestion serve dashboard tests
+	$(VENV)/bin/ruff check ingestion dashboard tests
 
 parse:  ## Validate the dbt project without a warehouse connection
 	cd $(DBTDIR) && $(abspath $(DBT)) parse --target $${DBT_TARGET:-local}
