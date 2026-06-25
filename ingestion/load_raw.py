@@ -45,6 +45,13 @@ CREATE TABLE IF NOT EXISTS {schema}.question (
     loaded_at   timestamptz NOT NULL DEFAULT now(),
     payload     jsonb NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS {schema}.corpus_profile (
+    corpus_build_id text PRIMARY KEY,
+    source_uri      text NOT NULL,
+    loaded_at       timestamptz NOT NULL DEFAULT now(),
+    payload         jsonb NOT NULL
+);
 """
 
 
@@ -98,12 +105,32 @@ def load_questions(conn: psycopg.Connection, storage: Storage, schema: str) -> i
     return len(questions)
 
 
+def load_corpus_profiles(conn: psycopg.Connection, storage: Storage, schema: str) -> int:
+    """Land every corpus profile. Idempotent upsert keyed by corpus_build_id (the build is
+    content-addressed, so the id changes when content changes — collisions are pure re-loads)."""
+    count = 0
+    for corpus_build_id in storage.list_corpus_build_ids():
+        profile = storage.read_corpus_profile(corpus_build_id)
+        source_uri = storage.corpus_source_uri(corpus_build_id)
+        conn.execute(
+            f"INSERT INTO {schema}.corpus_profile (corpus_build_id, source_uri, payload) "
+            f"VALUES (%s, %s, %s) "
+            f"ON CONFLICT (corpus_build_id) DO UPDATE SET "
+            f"source_uri = EXCLUDED.source_uri, payload = EXCLUDED.payload, loaded_at = now()",
+            (corpus_build_id, source_uri, Json(profile)),
+        )
+        count += 1
+    log.info("loaded %d corpus profiles", count)
+    return count
+
+
 def run(cfg: PostgresConfig, storage: Storage) -> dict[str, int]:
-    """Land questions + every discovered run. Returns simple counts for logging/tests."""
-    counts = {"runs": 0, "records": 0, "questions": 0}
+    """Land questions + corpus profiles + every discovered run. Returns counts for logging/tests."""
+    counts = {"runs": 0, "records": 0, "questions": 0, "corpus_profiles": 0}
     with psycopg.connect(cfg.conninfo, autocommit=True) as conn:
         ensure_schema(conn, cfg.raw_schema)
         counts["questions"] = load_questions(conn, storage, cfg.raw_schema)
+        counts["corpus_profiles"] = load_corpus_profiles(conn, storage, cfg.raw_schema)
         for run_id in storage.list_run_ids():
             counts["records"] += load_run(conn, storage, cfg.raw_schema, run_id)
             counts["runs"] += 1

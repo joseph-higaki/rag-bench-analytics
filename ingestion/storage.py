@@ -22,6 +22,10 @@ from .config import StorageConfig
 MANIFEST_SUFFIX = ".manifest.json"
 RECORDS_SUFFIX = ".jsonl"
 QUESTIONS_NAME = "questions.jsonl"
+# Corpus profiles (<corpus_build_id>.json) land under their own prefix/subdir — a
+# separate grain (one per corpus build, shared across runs), not run-keyed files.
+CORPUS_SUBDIR = "corpus"
+CORPUS_SUFFIX = ".json"
 
 
 def _iter_jsonl(text: str) -> Iterator[dict]:
@@ -41,6 +45,9 @@ class Storage(Protocol):
     def read_records(self, run_id: str) -> Iterator[dict]: ...
     def read_questions(self) -> Iterator[dict]: ...
     def has_questions(self) -> bool: ...
+    def list_corpus_build_ids(self) -> list[str]: ...
+    def corpus_source_uri(self, corpus_build_id: str) -> str: ...
+    def read_corpus_profile(self, corpus_build_id: str) -> dict: ...
 
 
 class LocalStorage:
@@ -71,6 +78,22 @@ class LocalStorage:
     def has_questions(self) -> bool:
         return (self.root / QUESTIONS_NAME).is_file()
 
+    def list_corpus_build_ids(self) -> list[str]:
+        corpus_dir = self.root / CORPUS_SUBDIR
+        if not corpus_dir.is_dir():
+            return []
+        return sorted(p.stem for p in corpus_dir.glob(f"*{CORPUS_SUFFIX}"))
+
+    def corpus_source_uri(self, corpus_build_id: str) -> str:
+        return (
+            self.root / CORPUS_SUBDIR / f"{corpus_build_id}{CORPUS_SUFFIX}"
+        ).resolve().as_uri()
+
+    def read_corpus_profile(self, corpus_build_id: str) -> dict:
+        return json.loads(
+            (self.root / CORPUS_SUBDIR / f"{corpus_build_id}{CORPUS_SUFFIX}").read_text()
+        )
+
 
 class S3Storage:
     """Reads run files from S3 (or MinIO via endpoint_url). Same Protocol as LocalStorage."""
@@ -80,6 +103,9 @@ class S3Storage:
 
         self.bucket = cfg.landing_bucket
         self.prefix = cfg.landing_prefix.rstrip("/") + "/" if cfg.landing_prefix else ""
+        self.corpus_prefix = (
+            cfg.corpus_prefix.rstrip("/") + "/" if cfg.corpus_prefix else ""
+        )
         self._s3 = boto3.client(
             "s3",
             endpoint_url=cfg.endpoint_url,  # None => real AWS
@@ -122,6 +148,27 @@ class S3Storage:
             return True
         except Exception:
             return False
+
+    def list_corpus_build_ids(self) -> list[str]:
+        paginator = self._s3.get_paginator("list_objects_v2")
+        ids: list[str] = []
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=self.corpus_prefix):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if key.endswith(CORPUS_SUFFIX):
+                    name = key[len(self.corpus_prefix):]
+                    ids.append(name[: -len(CORPUS_SUFFIX)])
+        return sorted(ids)
+
+    def corpus_source_uri(self, corpus_build_id: str) -> str:
+        return f"s3://{self.bucket}/{self.corpus_prefix}{corpus_build_id}{CORPUS_SUFFIX}"
+
+    def read_corpus_profile(self, corpus_build_id: str) -> dict:
+        obj = self._s3.get_object(
+            Bucket=self.bucket,
+            Key=f"{self.corpus_prefix}{corpus_build_id}{CORPUS_SUFFIX}",
+        )
+        return json.loads(obj["Body"].read().decode("utf-8"))
 
 
 def get_storage(cfg: StorageConfig) -> Storage:

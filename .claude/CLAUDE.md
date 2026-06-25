@@ -146,16 +146,18 @@ Grain of the fact: **one scored answer = run × question × condition.**
   (`generator_model_id` = `coalesce(model_resolved, model)`, `generator_model_family`
   rollup via the `model_family` macro, temperature), `dim_writer` (the SPARQL-writer LLM —
   model × temperature), `dim_scoring` (scoring_type), `dim_corpus` (`corpus_build_id`,
-  scale, sha, counts), `dim_run` (run_id, `judge_model`, `generator_system_prompt_sha256`,
-  timestamp).
+  scale, sha, graph/vector counts + `embed_model` enriched from the corpus-profile JSON via
+  `stg_corpus_profile`, ADR-004; counts null for unprofiled/older corpora, graph counts null
+  for smoke), `dim_run` (run_id, `judge_model`, `generator_system_prompt_sha256`, timestamp).
 
 Where each layer does the work:
 
 - **staging** flattens `run.json` and *explodes* `traversal_info` with
   mechanism-aware branching (this branch is the real transform — `traversal_info`
   is schema-on-read). Cast, rename, validate. One staging model per source.
-- **intermediate** joins question attributes and corpus profile, dedups.
-- **marts** builds the conformed star above.
+- **intermediate** joins question attributes and the pricing seed, dedups.
+- **marts** builds the conformed star above; `dim_corpus` left-joins `stg_corpus_profile`
+  on `corpus_build_id` (ADR-004).
 
 Routing reference (the morph): top-level ids → FKs; `score/verdict/latency/tokens`
 and exploded numerics → fact measures; `mechanism`/`writer_model` → dim attributes;

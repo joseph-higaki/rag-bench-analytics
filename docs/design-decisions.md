@@ -216,8 +216,23 @@ current volume, so the answer stays full-rebuild.
 
 ## ADR-004 — Enrich `dim_corpus` from the corpus-profile JSON (consume, don't re-measure)
 
-- **Status:** Accepted (pending) — its own execution batch, independent of ADR-003.
-- **Date:** 2026-06-24
+- **Status:** Accepted — **implemented 2026-06-25 (local half)**: raw source + `stg_corpus_profile`
+  + `dim_corpus` enrichment all built and green against the committed fixtures. The upstream
+  delivery CR (publish the profile to the landing prefix) is still open — it gates the **cloud**
+  path only; local runs on the seeded `corpus/` fixtures.
+- **Date:** 2026-06-24 (implemented 2026-06-25)
+
+### Implementation notes (two corrections to the checklist, decided during execution)
+
+1. **`dim_corpus` driver = `union(observed run ids, profile ids)`**, not observed-only. The
+   union keeps the legitimate **null-corpus member** (32 older fixture runs carry no
+   `corpus_build_id`) so the fact's `corpus_sk` relationship test holds, and it surfaces a
+   profiled-but-unreferenced corpus (smoke) so the dim is a real catalog — which is what the
+   verify step below expects. The profile is still left-joined (decision #3 holds).
+2. **`not_null` on the vector counts lives in `stg_corpus_profile`, not `dim_corpus`.** Every
+   staged row *is* a profile, so the vector counts are always present there; at the dim, the
+   null-corpus/unprofiled member has null counts by construction, so a dim-level `not_null`
+   would falsely fail the build.
 
 ### Context
 
@@ -285,24 +300,31 @@ _Upstream (gates cloud only)_
 - [ ] CR to the benchmark: publish `<corpus_build_id>.json` to the landing prefix.
 
 _Fixtures (unblocks local now)_
-- [ ] Add `smoke-*.json` + `full-*.json` profiles to `ingestion_sample/` and the MinIO seed.
+- [x] Added `smoke-30c621e8.json` + `full-2c102cb0.json` to `ingestion_sample/corpus/`; `make seed`
+      uploads the `corpus/` subdir to the `S3_CORPUS_PREFIX` (`corpus/`) prefix.
 
-_Ingestion_
-- [ ] `ingestion/extract.py`: list + download corpus-profile JSON (its own key prefix).
-- [ ] `ingestion/load_raw.py`: land into `raw.corpus_profile`, idempotent, keyed by `corpus_build_id`.
+_Ingestion_ (real layer is `storage.py` + `load_raw.py`, not the `extract.py` named above)
+- [x] `storage.py`: `Storage` Protocol + Local/S3 `list_corpus_build_ids` / `read_corpus_profile` /
+      `corpus_source_uri` (own `corpus/` prefix); `config.py`: `corpus_prefix`; `seed_storage.py`:
+      upload the `corpus/` subdir.
+- [x] `load_raw.py`: land into `raw.corpus_profile`, idempotent upsert keyed by `corpus_build_id`.
 
 _dbt_
-- [ ] `_sources.yml`: declare `raw.corpus_profile` (freshness optional — content-addressed, rarely changes).
-- [ ] New `stg_corpus_profile.sql`: flatten `graph.*`/`vector.*` from JSONB, cast, rename to `*_count`.
-- [ ] `dim_corpus.sql`: left-join `stg_corpus_profile` on `corpus_build_id`; replace the `cast(null …)` placeholders with the real columns.
-- [ ] `_marts.yml`: document `dim_corpus`'s new columns; `not_null` on the always-present vector counts, leave graph counts nullable (smoke).
+- [x] `_sources.yml`: declared `raw.corpus_profile` (`freshness: null` — content-addressed).
+- [x] New `stg_corpus_profile.sql`: flatten `graph.*`/`vector.*` from JSONB (`#>>`), cast, rename to `*_count`.
+- [x] `dim_corpus.sql`: union driver + left-join `stg_corpus_profile` on `corpus_build_id`; placeholders replaced with real columns.
+- [x] `_staging.yml` / `_marts.yml`: `not_null` on the always-present vector counts at **staging** (see correction 2);
+      `dim_corpus` columns documented, graph counts nullable (smoke), all counts nullable at the dim.
 
 _Docs_
-- [ ] README: add the profile JSON as a 4th landed input (source-contract section) and extend the `DIM_CORPUS` entity.
-- [ ] CLAUDE.md: note `dim_corpus` enrichment from the profile (incl. `embed_model` now on `dim_corpus`, removed from `dim_retriever_cond`).
+- [x] README: profile JSON as a 4th landed input (source-contract table + `CORPUS_PROFILE` entity + morph flowchart); `DIM_CORPUS` ERD extended.
+- [x] CLAUDE.md: `dim_corpus` enrichment from the profile (incl. `embed_model` now on `dim_corpus`).
 
 _Verify_
-- [ ] `make pipeline`: confirm `dim_corpus` populates from fixtures (full = counts; smoke = null graph counts); dashboard shows corpus size.
+- [x] `make pipeline` green (PASS=83, ERROR=0; `fct→dim_corpus` relationship passes). Confirmed
+      `raw.corpus_profile`=2 rows; `dim_corpus` = full (graph+vector counts), smoke (vector counts,
+      graph **null**), null-corpus member (all null). (Dashboard corpus-size widget deferred — no
+      current corpus refs in `dashboard/`.)
 
 ---
 

@@ -1,0 +1,27 @@
+{
+  "corpus_build_id": "full-2c102cb0",
+  "scale": "full",
+  "measured_at": "2026-06-11T14:52:49+0200",
+  "graph": {
+    "ttl_path": "ontology/hetionet.ttl",
+    "ttl_bytes": 490931418,
+    "ttl_sha256": "2e30518ae4b653f2648c7e71362b00ef640c18b8db73d19ffa69761ccfe22d0b",
+    "endpoint": "http://localhost:7200/repositories/hetionet",
+    "triples": 11275571,
+    "nodes": 47031,
+    "edges": 2250197,
+    "source": "sparql (live store)"
+  },
+  "vector": {
+    "chroma_path": "data/chroma",
+    "collection": "pubmed_abstracts",
+    "store_bytes": 1696505746,
+    "n_chunks": 152943,
+    "n_abstracts": 77424,
+    "n_words": 18429751,
+    "abstracts_dir": "data/abstracts",
+    "embed_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "chunk_size": 180,
+    "chunk_overlap": 30
+  }
+}

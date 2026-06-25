@@ -39,11 +39,15 @@ def loaded():
         records = conn.execute(
             f"select count(*) from {cfg.raw_schema}.scored_answer"
         ).fetchone()[0]
-    return first, second, manifests, records
+        corpus = conn.execute(
+            f"select count(*) from {cfg.raw_schema}.corpus_profile"
+        ).fetchone()[0]
+    return first, second, manifests, records, corpus
 
 
 def test_idempotent_load(loaded):
-    first, second, manifests, records = loaded
+    first, second, manifests, records, corpus = loaded
     assert first == second, "second load changed counts — not idempotent"
     assert manifests == first["runs"], "manifest rows != runs loaded"
     assert records == first["records"], "scored_answer rows != records loaded (duplication?)"
+    assert corpus == first["corpus_profiles"], "corpus_profile rows != profiles (upsert leak?)"
