@@ -50,7 +50,11 @@ def main() -> None:
     # Join the slicing dimensions onto the fact for display.
     df = (
         fct.merge(dim_ret, on="retriever_cond_sk", how="left", suffixes=("", "_ret"))
-        .merge(dim_q[["question_sk", "type_id", "question_hop_count"]], on="question_sk", how="left")
+        .merge(
+            dim_q[["question_sk", "type_id", "question_hop_count"]],
+            on="question_sk",
+            how="left",
+        )
     )
 
     # ── headline metrics ──
@@ -93,7 +97,12 @@ def main() -> None:
     st.subheader("Pass rate by question hop-count × retriever")
     pivot = (
         df.dropna(subset=["question_hop_count"])
-        .pivot_table(index="question_hop_count", columns="display_label", values="is_passed", aggfunc="mean")
+        .pivot_table(
+            index="question_hop_count",
+            columns="display_label",
+            values="is_passed",
+            aggfunc="mean",
+        )
     )
     st.dataframe(pivot.style.format("{:.0%}", na_rep="—"), use_container_width=True)
 
