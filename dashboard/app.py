@@ -50,14 +50,18 @@ def main() -> None:
     # Join the slicing dimensions onto the fact for display.
     df = (
         fct.merge(dim_ret, on="retriever_cond_sk", how="left", suffixes=("", "_ret"))
-        .merge(dim_q[["question_sk", "type_id", "hop_count"]], on="question_sk", how="left")
+        .merge(
+            dim_q[["question_sk", "type_id", "question_hop_count"]],
+            on="question_sk",
+            how="left",
+        )
     )
 
     # ── headline metrics ──
-    judged = df[df["judged"]]
+    judged = df[df["is_judged"]]
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Scored answers", f"{len(df):,}")
-    c2.metric("Pass rate (judged)", f"{judged['is_pass'].mean():.1%}" if len(judged) else "—")
+    c2.metric("Pass rate (judged)", f"{judged['is_passed'].mean():.1%}" if len(judged) else "—")
     c3.metric("Total cost (USD)", f"${df['total_cost_usd'].sum():,.4f}")
     c4.metric("Error rate", f"{df['is_error'].mean():.1%}")
 
@@ -69,10 +73,10 @@ def main() -> None:
         df.groupby("display_label")
         .agg(
             n=("scored_answer_sk", "count"),
-            pass_rate=("is_pass", "mean"),
+            pass_rate=("is_passed", "mean"),
             avg_cost_usd=("total_cost_usd", "mean"),
             avg_latency_ms=("total_latency_ms", "mean"),
-            avg_total_tokens=("total_tokens", "mean"),
+            avg_total_tokens=("generator_total_tokens", "mean"),
         )
         .sort_values("pass_rate", ascending=False)
     )
@@ -89,11 +93,16 @@ def main() -> None:
 
     st.divider()
 
-    # ── pass rate by question difficulty (hop_count) × retriever ──
+    # ── pass rate by question difficulty (question_hop_count) × retriever ──
     st.subheader("Pass rate by question hop-count × retriever")
     pivot = (
-        df.dropna(subset=["hop_count"])
-        .pivot_table(index="hop_count", columns="display_label", values="is_pass", aggfunc="mean")
+        df.dropna(subset=["question_hop_count"])
+        .pivot_table(
+            index="question_hop_count",
+            columns="display_label",
+            values="is_passed",
+            aggfunc="mean",
+        )
     )
     st.dataframe(pivot.style.format("{:.0%}", na_rep="—"), use_container_width=True)
 

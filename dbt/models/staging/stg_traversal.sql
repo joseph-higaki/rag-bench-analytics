@@ -36,14 +36,14 @@ select
         end
     )                                                            as mechanism,
 
-    -- neighborhood (graph) measures
+    -- neighborhood (graph) measures (mechanism-prefixed; neighborhood_hops is a knob -> dim)
     (ti ->> 'hops')::int                                        as neighborhood_hops,
-    (ti ->> 'num_triples')::int                                 as num_triples,
-    (ti ->> 'num_linked')::int                                  as num_linked,
+    (ti ->> 'num_triples')::int                                 as neighborhood_num_triples,
+    (ti ->> 'num_linked')::int                                  as neighborhood_num_linked,
 
-    -- dense (vector) measures / attributes
+    -- dense (vector) measures / attributes (top_k is a knob -> dim)
     (ti ->> 'top_k')::int                                       as top_k,
-    (ti ->> 'num_chunks')::int                                  as num_chunks,
+    (ti ->> 'num_chunks')::int                                  as dense_num_chunks,
     ti ->> 'embed_model'                                        as embed_model,
 
     -- sparqlgen (writer LLM) measures / attributes
@@ -51,7 +51,7 @@ select
     (ti ->> 'writer_temperature')::numeric                      as writer_temperature,
     (ti ->> 'writer_input_tokens')::bigint                      as writer_input_tokens,
     (ti ->> 'writer_output_tokens')::bigint                     as writer_output_tokens,
-    (ti ->> 'sparql_valid')::boolean                            as sparql_valid,
+    (ti ->> 'sparql_valid')::boolean                            as is_sparql_valid,
     (ti ->> 'num_rows')::int                                    as sparql_num_rows,
 
     -- shared provenance (kept here, dropped from the star)

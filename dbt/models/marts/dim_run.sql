@@ -5,7 +5,7 @@ select
     {{ surrogate_key(['run_id']) }}     as run_sk,
     run_id,
     run_ts,
-    judge,
+    judge_model,
     harness_version,
-    system_prompt_sha256
+    generator_system_prompt_sha256
 from {{ ref('stg_runs') }}

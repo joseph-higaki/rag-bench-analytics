@@ -48,11 +48,11 @@ models:
                 values: ['dense', 'neighborhood', 'sparqlgen', 'none']
 
   - name: stg_questions
-    description: Flattened question bank; hop_count parsed from type_id.
+    description: Flattened question bank; question_hop_count parsed from type_id.
     columns:
       - name: question_id
         tests: [not_null, unique]
-      - name: hop_count
+      - name: question_hop_count
         tests:
           - accepted_values:
               arguments:

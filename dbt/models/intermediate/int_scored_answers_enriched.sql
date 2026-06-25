@@ -15,7 +15,7 @@ questions as (
     select * from {{ ref('stg_questions') }}
 ),
 runs as (
-    select run_id, run_ts, judge, corpus_build_id, harness_version, system_prompt_sha256
+    select run_id, run_ts, judge_model, corpus_build_id, harness_version, generator_system_prompt_sha256
     from {{ ref('stg_runs') }}
 ),
 gen_price as (
@@ -30,15 +30,16 @@ select
 
     -- run attributes (degenerate / dimension feeds)
     r.run_ts,
-    r.judge,
+    r.judge_model,
     r.corpus_build_id,
     r.harness_version,
-    r.system_prompt_sha256,
+    r.generator_system_prompt_sha256,
 
-    -- generator attributes
+    -- generator attributes (conformed identity + family rollup; raw _resolved is used
+    -- only by the cost join below, so it need not surface here)
     a.generator_provider,
-    a.generator_model,
-    a.generator_model_resolved,
+    a.generator_model_id,
+    a.generator_model_family,
     a.generator_temperature,
 
     -- retriever condition attributes
@@ -52,48 +53,49 @@ select
     a.scoring,
     q.type_id,
     q.template_id,
-    q.hop_count                                     as question_hop_count,
-    q.num_seeds,
+    q.question_hop_count,
+    q.num_seed_entities,
 
     -- outcome measures
     a.score,
-    a.passed,
-    a.judged,
+    a.is_passed,
+    a.is_judged,
     a.verdict,
     a.error,
     (a.error is not null)                           as is_error,
 
     -- token + latency measures
-    a.input_tokens,
-    a.output_tokens,
-    a.cache_read_input_tokens,
-    a.cache_creation_input_tokens,
-    coalesce(a.input_tokens, 0) + coalesce(a.output_tokens, 0)  as total_tokens,
+    a.generator_input_tokens,
+    a.generator_output_tokens,
+    a.generator_cache_read_tokens,
+    a.generator_cache_creation_tokens,
+    coalesce(a.generator_input_tokens, 0) + coalesce(a.generator_output_tokens, 0) as generator_total_tokens,
     a.context_tokens_proxy,
     a.num_sources,
     a.retrieval_latency_ms,
     a.generation_latency_ms,
     coalesce(a.retrieval_latency_ms, 0) + coalesce(a.generation_latency_ms, 0) as total_latency_ms,
 
-    -- exploded traversal measures
+    -- exploded traversal measures (neighborhood_hops/top_k are knobs -> dim_retriever_cond;
+    -- writer_model/_temperature -> dim_writer; carried here only to build those dims/keys)
     t.neighborhood_hops,
-    t.num_triples,
-    t.num_linked,
+    t.neighborhood_num_triples,
+    t.neighborhood_num_linked,
     t.top_k,
-    t.num_chunks,
+    t.dense_num_chunks,
     t.writer_temperature,
     t.writer_input_tokens,
     t.writer_output_tokens,
-    coalesce(t.writer_input_tokens, 0) + coalesce(t.writer_output_tokens, 0) as writer_tokens,
-    t.sparql_valid,
+    coalesce(t.writer_input_tokens, 0) + coalesce(t.writer_output_tokens, 0) as writer_total_tokens,
+    t.is_sparql_valid,
     t.sparql_num_rows,
 
     -- COST (per 1M tokens -> divide by 1e6)
     (
-        coalesce(a.input_tokens, 0)            * gp.input_usd_per_mtok
-      + coalesce(a.output_tokens, 0)           * gp.output_usd_per_mtok
-      + coalesce(a.cache_read_input_tokens, 0) * gp.cache_read_usd_per_mtok
-      + coalesce(a.cache_creation_input_tokens, 0) * gp.cache_write_usd_per_mtok
+        coalesce(a.generator_input_tokens, 0)            * gp.input_usd_per_mtok
+      + coalesce(a.generator_output_tokens, 0)           * gp.output_usd_per_mtok
+      + coalesce(a.generator_cache_read_tokens, 0)       * gp.cache_read_usd_per_mtok
+      + coalesce(a.generator_cache_creation_tokens, 0)   * gp.cache_write_usd_per_mtok
     ) / 1e6                                          as generator_cost_usd,
     (
         coalesce(t.writer_input_tokens, 0)  * wp.input_usd_per_mtok

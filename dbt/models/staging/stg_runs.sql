@@ -13,11 +13,11 @@ select
     payload ->> 'generator_model'                           as generator_model,
     payload ->> 'generator_model_resolved'                  as generator_model_resolved,
     (payload ->> 'generator_temperature')::numeric          as generator_temperature,
-    payload ->> 'judge'                                     as judge,
+    payload ->> 'judge'                                     as judge_model,
     payload ->> 'corpus_build_id'                           as corpus_build_id,
     payload ->> 'harness_version'                           as harness_version,
     (payload ->> 'num_questions')::int                      as num_questions,
-    payload ->> 'system_prompt_sha256'                      as system_prompt_sha256,
+    payload ->> 'system_prompt_sha256'                      as generator_system_prompt_sha256,
     source_uri,
     loaded_at
 from src
