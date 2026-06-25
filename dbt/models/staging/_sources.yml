@@ -33,3 +33,12 @@ sources:
         columns:
           - name: question_id
             tests: [not_null, unique]
+      - name: corpus_profile
+        description: >
+          One row per corpus build (<corpus_build_id>.json) — graph/vector size metrics
+          measured by the benchmark. Content-addressed: rebuilt corpus => new id => new row.
+        # No freshness: content-addressed and rarely changes (unlike run/manifest landings).
+        freshness: null
+        columns:
+          - name: corpus_build_id
+            tests: [not_null, unique]

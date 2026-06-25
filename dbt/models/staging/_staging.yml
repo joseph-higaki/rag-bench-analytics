@@ -58,3 +58,17 @@ models:
               arguments:
                 values: [0, 1, 2, 3]
                 quote: false
+
+  - name: stg_corpus_profile
+    description: Flattened corpus profile; one row per corpus_build_id. Graph counts null for smoke.
+    columns:
+      - name: corpus_build_id
+        tests: [not_null, unique]
+      # Vector counts are always emitted (every profile measures the vector store). The honest
+      # place for not_null: at the dim these are null for the unprofiled/older-run corpus member.
+      - name: paper_count
+        tests: [not_null]
+      - name: chunk_count
+        tests: [not_null]
+      - name: word_count
+        tests: [not_null]

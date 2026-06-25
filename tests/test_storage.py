@@ -71,6 +71,17 @@ def test_traversal_info_polymorphism_is_tolerated(storage: LocalStorage):
             assert derive(rec) in valid, rec.get("retriever")
 
 
+def test_discovers_corpus_profiles(storage: LocalStorage):
+    """Corpus profiles live in the corpus/ subdir, keyed by corpus_build_id (the filename)."""
+    ids = storage.list_corpus_build_ids()
+    assert ids, "no corpus profiles discovered"
+    for corpus_build_id in ids:
+        profile = storage.read_corpus_profile(corpus_build_id)
+        assert profile["corpus_build_id"] == corpus_build_id
+        # Vector counts are always emitted; graph counts may be null (smoke has no endpoint).
+        assert profile["vector"]["n_chunks"] is not None
+
+
 def test_missing_dir_raises():
     with pytest.raises(FileNotFoundError):
         LocalStorage("/nonexistent/path/xyz")

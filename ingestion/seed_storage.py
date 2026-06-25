@@ -55,6 +55,19 @@ def main() -> int:
         key = f"{prefix}{p.name}"
         s3.upload_file(str(p), cfg.landing_bucket, key)
     log.info("seeded %d files into s3://%s/%s", len(files), cfg.landing_bucket, prefix)
+
+    # Corpus profiles live in the corpus/ subdir locally and land under their own prefix.
+    corpus_dir = src / "corpus"
+    corpus_prefix = cfg.corpus_prefix.rstrip("/") + "/" if cfg.corpus_prefix else ""
+    corpus_files = (
+        sorted(p for p in corpus_dir.iterdir() if p.is_file()) if corpus_dir.is_dir() else []
+    )
+    for p in corpus_files:
+        s3.upload_file(str(p), cfg.landing_bucket, f"{corpus_prefix}{p.name}")
+    log.info(
+        "seeded %d corpus profiles into s3://%s/%s",
+        len(corpus_files), cfg.landing_bucket, corpus_prefix,
+    )
     return 0
 
 

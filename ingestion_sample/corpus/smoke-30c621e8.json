@@ -1,0 +1,27 @@
+{
+  "corpus_build_id": "smoke-30c621e8",
+  "scale": "smoke",
+  "measured_at": "2026-06-11T14:40:37+0200",
+  "graph": {
+    "ttl_path": "ontology/hetionet-smoke.ttl",
+    "ttl_bytes": 45594,
+    "ttl_sha256": "98d458e58417b20afc8ac89f74f8852d0bb877648c53ab4bd516a0ae3b81936c",
+    "endpoint": null,
+    "triples": null,
+    "nodes": null,
+    "edges": null,
+    "source": "ttl-provenance-only (no endpoint serving this corpus)"
+  },
+  "vector": {
+    "chroma_path": "data/chroma-smoke",
+    "collection": "pubmed_abstracts",
+    "store_bytes": 774308,
+    "n_chunks": 28,
+    "n_abstracts": 15,
+    "n_words": 3402,
+    "abstracts_dir": "data/abstracts-smoke",
+    "embed_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "chunk_size": 180,
+    "chunk_overlap": 30
+  }
+}

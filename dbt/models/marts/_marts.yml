@@ -178,9 +178,41 @@ models:
         tests: [not_null, unique]
 
   - name: dim_corpus
-    description: Corpus build identity. Grain corpus_build_id.
+    description: >
+      Corpus build identity + size metrics (ADR-004). Grain corpus_build_id. Counts are
+      null for the unprofiled/older-run member; graph counts additionally null for smoke.
     columns:
       - name: corpus_sk
         tests: [not_null, unique]
       - name: corpus_build_id
         tests: [unique]
+      - name: corpus_scale
+        description: full | smoke — from the profile, falling back to the id prefix.
+      - name: corpus_sha
+        description: Short content hash, parsed from corpus_build_id.
+      - name: triple_count
+        description: Graph triples (null for smoke — no endpoint).
+      - name: node_count
+        description: Graph nodes (null for smoke).
+      - name: edge_count
+        description: Graph edges (null for smoke).
+      - name: paper_count
+        description: Vector-store abstracts (n_abstracts).
+      - name: chunk_count
+        description: Vector-store chunks (n_chunks).
+      - name: word_count
+        description: Source words, overlap-free (n_words).
+      - name: chunk_size
+        description: Chunking build knob (tokens).
+      - name: chunk_overlap
+        description: Chunking build knob (tokens).
+      - name: ttl_bytes
+        description: Hetionet TTL size in bytes (graph provenance).
+      - name: ttl_sha256
+        description: SHA-256 of the source TTL (graph provenance).
+      - name: store_bytes
+        description: Vector store size in bytes.
+      - name: embed_model
+        description: Embedding model — FD on the corpus (the build id hashes it), not the retriever.
+      - name: corpus_measured_at
+        description: When the benchmark profiled this corpus build.
