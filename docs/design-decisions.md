@@ -308,8 +308,10 @@ _Verify_
 
 ## ADR-003 — Marts field-naming convention: knobs → dims, mechanism-prefixed measures
 
-- **Status:** Accepted (pending) — implementation deferred to a later batch.
-- **Date:** 2026-06-24
+- **Status:** Accepted — **implemented 2026-06-25** (full rebuild green: PASS=75, ERROR=0;
+  all relationships incl. new `writer_sk` / renamed `scoring_sk` / expanded `retriever_cond_sk`
+  pass; dashboard data path smoke-tested via the read-only role).
+- **Date:** 2026-06-24 (implemented 2026-06-25)
 
 ### Context
 
@@ -432,39 +434,39 @@ Grouped by the convention rule each one serves.
 ### Implementation checklist (the execution plan — staging → intermediate → marts → contract → docs → rebuild → dashboard)
 
 _Macros_
-- [ ] New `macros/model_family.sql`: `regexp_replace(<expr>, '-\d{8}$', '')` — strip the dated snapshot suffix (date-less names pass through). The single home for model-name normalization; reused wherever a `*_family` column is added.
+- [x] New `macros/model_family.sql`: `regexp_replace(<expr>, '-\d{8}$', '')` — strip the dated snapshot suffix (date-less names pass through). The single home for model-name normalization; reused wherever a `*_family` column is added.
 
 _Staging_
-- [ ] `stg_traversal.sql`: rename measures `num_triples`→`neighborhood_num_triples`, `num_linked`→`neighborhood_num_linked`, `num_chunks`→`dense_num_chunks`. Keep `top_k`/`writer_model`/`writer_temperature` routing to dims; `embed_model` stays parsed as **provenance only** (its star home is `dim_corpus` via ADR-004, from the corpus profile — not routed here). Apply `model_family()` to `writer_model` only if that rollup will be grouped/filtered (don't add unused).
-- [ ] `stg_scored_answers.sql`: `input_tokens`→`generator_input_tokens`, `output_tokens`→`generator_output_tokens`, `cache_read_input_tokens`→`generator_cache_read_tokens`, `cache_creation_input_tokens`→`generator_cache_creation_tokens`; `passed`→`is_passed`, `judged`→`is_judged`; add `generator_model_id = coalesce(generator_model_resolved, generator_model)` and `generator_model_family = {{ model_family('coalesce(generator_model_resolved, generator_model)') }}`. (`num_sources`, `context_tokens_proxy`, `is_error` source unchanged.)
-- [ ] `stg_questions.sql`: `num_seeds`→`num_seed_entities`; `hop_count`→`question_hop_count`.
-- [ ] `stg_runs.sql`: `judge`→`judge_model`; `system_prompt_sha256`→`generator_system_prompt_sha256`.
+- [x] `stg_traversal.sql`: rename measures `num_triples`→`neighborhood_num_triples`, `num_linked`→`neighborhood_num_linked`, `num_chunks`→`dense_num_chunks`. Keep `top_k`/`writer_model`/`writer_temperature` routing to dims; `embed_model` stays parsed as **provenance only** (its star home is `dim_corpus` via ADR-004, from the corpus profile — not routed here). Apply `model_family()` to `writer_model` only if that rollup will be grouped/filtered (don't add unused).
+- [x] `stg_scored_answers.sql`: `input_tokens`→`generator_input_tokens`, `output_tokens`→`generator_output_tokens`, `cache_read_input_tokens`→`generator_cache_read_tokens`, `cache_creation_input_tokens`→`generator_cache_creation_tokens`; `passed`→`is_passed`, `judged`→`is_judged`; add `generator_model_id = coalesce(generator_model_resolved, generator_model)` and `generator_model_family = {{ model_family('coalesce(generator_model_resolved, generator_model)') }}`. (`num_sources`, `context_tokens_proxy`, `is_error` source unchanged.)
+- [x] `stg_questions.sql`: `num_seeds`→`num_seed_entities`; `hop_count`→`question_hop_count`.
+- [x] `stg_runs.sql`: `judge`→`judge_model`; `system_prompt_sha256`→`generator_system_prompt_sha256`.
 
 _Intermediate_
-- [ ] `int_scored_answers_enriched.sql`: propagate every rename above; drop the now-redundant `q.hop_count as question_hop_count` alias (source is already `question_hop_count`); compute `generator_total_tokens` (gen in+out) and `writer_total_tokens` (writer in+out); keep `top_k`/`writer_model`/`writer_temperature` flowing for the dims; pass through `generator_model_id` + `generator_model_family` for `dim_generator`.
+- [x] `int_scored_answers_enriched.sql`: propagate every rename above; drop the now-redundant `q.hop_count as question_hop_count` alias (source is already `question_hop_count`); compute `generator_total_tokens` (gen in+out) and `writer_total_tokens` (writer in+out); keep `top_k`/`writer_model`/`writer_temperature` flowing for the dims; pass through `generator_model_id` + `generator_model_family` for `dim_generator`.
 
 _Marts — dims_
-- [ ] New `dim_writer.sql`: grain (`writer_model`, `writer_temperature`); `writer_sk = surrogate_key(['writer_model','writer_temperature'])`; built from observed combos in `int_` (includes the null-writer member).
-- [ ] `dim_generator.sql`: group by `(generator_provider, generator_model_id, generator_temperature)`; `generator_sk = surrogate_key(['generator_provider','generator_model_id','generator_temperature'])`; select `generator_model_family`; drop the redundant `max(generator_model)` display label (family replaces it).
-- [ ] `dim_retriever_cond.sql`: add `top_k` to the `observed` group-by **and** the `surrogate_key([...])`; select it as an attribute. (`embed_model` is **not** added — it belongs to `dim_corpus`, ADR-004.)
-- [ ] `dim_question.sql`: `num_seeds`→`num_seed_entities`; select `question_hop_count`; **drop `answer_var`** from the select (it stays in `stg_questions` for provenance).
-- [ ] `dim_run.sql`: `judge`→`judge_model`; `system_prompt_sha256`→`generator_system_prompt_sha256`.
-- [ ] Rename `dim_judge.sql`→`dim_scoring.sql`; `judge_sk`→`scoring_sk` (keep the `seed_scoring_labels` join).
+- [x] New `dim_writer.sql`: grain (`writer_model`, `writer_temperature`); `writer_sk = surrogate_key(['writer_model','writer_temperature'])`; built from observed combos in `int_` (includes the null-writer member).
+- [x] `dim_generator.sql`: group by `(generator_provider, generator_model_id, generator_temperature)`; `generator_sk = surrogate_key(['generator_provider','generator_model_id','generator_temperature'])`; select `generator_model_family`; drop the redundant `max(generator_model)` display label (family replaces it).
+- [x] `dim_retriever_cond.sql`: add `top_k` to the `observed` group-by **and** the `surrogate_key([...])`; select it as an attribute. (`embed_model` is **not** added — it belongs to `dim_corpus`, ADR-004.)
+- [x] `dim_question.sql`: `num_seeds`→`num_seed_entities`; select `question_hop_count`; **drop `answer_var`** from the select (it stays in `stg_questions` for provenance).
+- [x] `dim_run.sql`: `judge`→`judge_model`; `system_prompt_sha256`→`generator_system_prompt_sha256`.
+- [x] Rename `dim_judge.sql`→`dim_scoring.sql`; `judge_sk`→`scoring_sk` (keep the `seed_scoring_labels` join).
 
 _Marts — fact_
-- [ ] `fct_scored_answer.sql`: apply all measure/boolean renames (group A, C, D); **remove** `run_id`, `question_id` (copied natural keys), `neighborhood_hops` (redundant knob, lives in `dim_retriever_cond` grain), `top_k`, `writer_model`, `writer_temperature`, `is_pass`; add `writer_sk = surrogate_key(['writer_model','writer_temperature'])`; add `'top_k'` to the `retriever_cond_sk` key list (must match `dim_retriever_cond` exactly); rename FK `judge_sk`→`scoring_sk`; recompute `generator_sk` on `['generator_provider','generator_model_id','generator_temperature']` to match `dim_generator`.
+- [x] `fct_scored_answer.sql`: apply all measure/boolean renames (group A, C, D); **remove** `run_id`, `question_id` (copied natural keys), `neighborhood_hops` (redundant knob, lives in `dim_retriever_cond` grain), `top_k`, `writer_model`, `writer_temperature`, `is_pass`; add `writer_sk = surrogate_key(['writer_model','writer_temperature'])`; add `'top_k'` to the `retriever_cond_sk` key list (must match `dim_retriever_cond` exactly); rename FK `judge_sk`→`scoring_sk`; recompute `generator_sk` on `['generator_provider','generator_model_id','generator_temperature']` to match `dim_generator`.
 
 _Contract + tests_
-- [ ] `_marts.yml`: fact contract — every rename, the drops, add `writer_sk` (+ `relationships`→`dim_writer`), rename `judge_sk`→`scoring_sk` (+ retarget relationship); rename the `dim_judge` model block → `dim_scoring`; update `dim_question` `accepted_values` to `question_hop_count`; note `top_k` in the `dim_retriever_cond` grain.
+- [x] `_marts.yml`: fact contract — every rename, the drops, add `writer_sk` (+ `relationships`→`dim_writer`), rename `judge_sk`→`scoring_sk` (+ retarget relationship); rename the `dim_judge` model block → `dim_scoring`; update `dim_question` `accepted_values` to `question_hop_count`; note `top_k` in the `dim_retriever_cond` grain.
 
 _Docs_
-- [ ] `.claude/CLAUDE.md` "Target model" + dim list: add `dim_writer`; `dim_judge`→`dim_scoring`; drop `top_k` from fact measures (now a retriever-cond attr); reflect token/boolean naming + `num_seed_entities`; note `dim_generator` conformed on `coalesce(model_resolved, model)` + the `generator_model_family` rollup (via the `model_family` macro).
+- [x] `.claude/CLAUDE.md` "Target model" + dim list: add `dim_writer`; `dim_judge`→`dim_scoring`; drop `top_k` from fact measures (now a retriever-cond attr); reflect token/boolean naming + `num_seed_entities`; note `dim_generator` conformed on `coalesce(model_resolved, model)` + the `generator_model_family` rollup (via the `model_family` macro).
 
 _Rebuild + verify_
-- [ ] `make parse` → `make dbt`: full rebuild (sk values change); confirm contract + all relationships (incl. new `writer_sk`, renamed `scoring_sk`) pass; spot-check the `fct`↔`dim_retriever_cond` join after the grain expansion.
+- [x] `make parse` → `make dbt`: full rebuild (sk values change); confirm contract + all relationships (incl. new `writer_sk`, renamed `scoring_sk`) pass; spot-check the `fct`↔`dim_retriever_cond` join after the grain expansion.
 
 _Dashboard_
-- [ ] Sweep `dashboard/` for every renamed/removed column; switch pass-rate to `avg(is_passed::int)` (was `is_pass`); update any `dim_judge`/`judge_sk` references. (The `dbt/analyses/*` probes reference tables, not columns — unaffected.)
+- [x] Sweep `dashboard/` for every renamed/removed column; switch pass-rate to `avg(is_passed::int)` (was `is_pass`); update any `dim_judge`/`judge_sk` references. (The `dbt/analyses/*` probes reference tables, not columns — unaffected.)
 
 ---
 

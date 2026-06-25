@@ -22,7 +22,7 @@ seeds:
         tests: [not_null, unique]
 
   - name: seed_scoring_labels
-    description: Conforms each scoring type to a family + display label for dim_judge.
+    description: Conforms each scoring type to a family + display label for dim_scoring.
     columns:
       - name: scoring
         tests: [not_null, unique]

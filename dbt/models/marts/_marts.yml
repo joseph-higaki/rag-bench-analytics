@@ -8,7 +8,9 @@ models:
   # the project note: scoping strict contracts to the fact limits unverifiable type
   # fragility while protecting the surface the dashboard actually binds to.)
   - name: fct_scored_answer
-    description: One scored answer = run × question. Measures + FKs to all dims, incl. cost.
+    description: >
+      One scored answer = run × question. Surrogate-keys-only: a PK + FKs to all dims +
+      measures + cost. Natural keys and condition knobs live in their dimensions (ADR-003).
     config:
       contract: {enforced: true}
     columns:
@@ -16,14 +18,6 @@ models:
         data_type: text
         constraints: [{type: not_null}]
         tests: [unique]
-      - name: run_id
-        data_type: text
-        constraints: [{type: not_null}]
-      - name: question_id
-        data_type: text
-        constraints: [{type: not_null}]
-      - name: writer_model
-        data_type: text
       - name: run_sk
         data_type: text
         tests:
@@ -52,13 +46,20 @@ models:
               arguments:
                 to: ref('dim_retriever_cond')
                 field: retriever_cond_sk
-      - name: judge_sk
+      - name: writer_sk
         data_type: text
         tests:
           - relationships:
               arguments:
-                to: ref('dim_judge')
-                field: judge_sk
+                to: ref('dim_writer')
+                field: writer_sk
+      - name: scoring_sk
+        data_type: text
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_scoring')
+                field: scoring_sk
       - name: corpus_sk
         data_type: text
         tests:
@@ -68,23 +69,21 @@ models:
                 field: corpus_sk
       - name: score
         data_type: numeric
-      - name: passed
+      - name: is_passed
         data_type: boolean
-      - name: judged
+      - name: is_judged
         data_type: boolean
       - name: is_error
         data_type: boolean
-      - name: is_pass
-        data_type: integer
-      - name: input_tokens
+      - name: generator_input_tokens
         data_type: bigint
-      - name: output_tokens
+      - name: generator_output_tokens
         data_type: bigint
-      - name: cache_read_input_tokens
+      - name: generator_cache_read_tokens
         data_type: bigint
-      - name: cache_creation_input_tokens
+      - name: generator_cache_creation_tokens
         data_type: bigint
-      - name: total_tokens
+      - name: generator_total_tokens
         data_type: bigint
       - name: context_tokens_proxy
         data_type: bigint
@@ -96,25 +95,19 @@ models:
         data_type: numeric
       - name: total_latency_ms
         data_type: numeric
-      - name: neighborhood_hops
+      - name: neighborhood_num_triples
         data_type: integer
-      - name: num_triples
+      - name: neighborhood_num_linked
         data_type: integer
-      - name: num_linked
+      - name: dense_num_chunks
         data_type: integer
-      - name: top_k
-        data_type: integer
-      - name: num_chunks
-        data_type: integer
-      - name: writer_temperature
-        data_type: numeric
       - name: writer_input_tokens
         data_type: bigint
       - name: writer_output_tokens
         data_type: bigint
-      - name: writer_tokens
+      - name: writer_total_tokens
         data_type: bigint
-      - name: sparql_valid
+      - name: is_sparql_valid
         data_type: boolean
       - name: sparql_num_rows
         data_type: integer
@@ -141,7 +134,7 @@ models:
         tests: [not_null, unique]
       - name: question_id
         tests: [not_null, unique]
-      - name: hop_count
+      - name: question_hop_count
         tests:
           - accepted_values:
               arguments:
@@ -149,7 +142,7 @@ models:
                 quote: false
 
   - name: dim_generator
-    description: Distinct generator configs (provider × model_resolved × temperature).
+    description: Distinct generator configs (provider × model_id × temperature); model_id conformed.
     columns:
       - name: generator_sk
         tests: [not_null, unique]
@@ -160,7 +153,7 @@ models:
                 values: ['anthropic', 'ollama']
 
   - name: dim_retriever_cond
-    description: The compared variable — distinct (retriever, mechanism, neighborhood_hops).
+    description: The compared variable — distinct (retriever, mechanism, neighborhood_hops, top_k).
     columns:
       - name: retriever_cond_sk
         tests: [not_null, unique]
@@ -170,10 +163,16 @@ models:
               arguments:
                 values: ['dense', 'neighborhood', 'sparqlgen', 'none']
 
-  - name: dim_judge
-    description: Scoring/judge types. Grain scoring.
+  - name: dim_writer
+    description: SPARQL-writer LLM configs (model × temperature); includes the null-writer member.
     columns:
-      - name: judge_sk
+      - name: writer_sk
+        tests: [not_null, unique]
+
+  - name: dim_scoring
+    description: Scoring types. Grain scoring.
+    columns:
+      - name: scoring_sk
         tests: [not_null, unique]
       - name: scoring
         tests: [not_null, unique]

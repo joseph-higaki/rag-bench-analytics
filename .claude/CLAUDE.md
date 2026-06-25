@@ -133,15 +133,21 @@ profile (`corpus_build_id`, `ttl_sha256`, counts) referenced by the run manifest
 
 Grain of the fact: **one scored answer = run × question × condition.**
 
-- `fct_scored_answer` — FKs to all dims + measures: `score`, `verdict`,
-  `latency_ms`, `context_tokens`, and the *exploded* `traversal_info` measures
-  (`hop_count`, `writer_tokens` = input+output, `sparql_valid`). Sparse columns are
-  expected and acceptable (null where a mechanism doesn't produce them).
-- `dim_question` (type, hop_count, template_id), `dim_retriever_cond`
-  (null/vector/graph_neighborhood/graph_sparqlgen, plus `mechanism`/`writer_model`
-  as attributes), `dim_generator` (model, temperature), `dim_judge` (scoring_type),
-  `dim_corpus` (`corpus_build_id`, scale, sha, counts), `dim_run` (run_id, seed,
-  code_tag, dataset_ver, timestamp).
+- `fct_scored_answer` — surrogate FKs to all dims + measures: `score`, booleans
+  (`is_passed`/`is_judged`/`is_error`/`is_sparql_valid`), actor-prefixed tokens
+  (`generator_total_tokens` = in+out, `writer_total_tokens`), latencies, and the
+  *exploded* `traversal_info` measures (`neighborhood_num_triples`/`neighborhood_num_linked`,
+  `dense_num_chunks`, `sparql_num_rows`) + cost trio. Knobs (`top_k`, `neighborhood_hops`,
+  `writer_*`) are **not** fact measures — they live in dims. Sparse columns expected
+  (null where a mechanism doesn't produce them).
+- `dim_question` (type, `question_hop_count`, template_id, `num_seed_entities`),
+  `dim_retriever_cond` (null/vector/graph_neighborhood/graph_sparqlgen, `mechanism` +
+  the condition knobs `neighborhood_hops`/`top_k` in the grain), `dim_generator`
+  (`generator_model_id` = `coalesce(model_resolved, model)`, `generator_model_family`
+  rollup via the `model_family` macro, temperature), `dim_writer` (the SPARQL-writer LLM —
+  model × temperature), `dim_scoring` (scoring_type), `dim_corpus` (`corpus_build_id`,
+  scale, sha, counts), `dim_run` (run_id, `judge_model`, `generator_system_prompt_sha256`,
+  timestamp).
 
 Where each layer does the work:
 
