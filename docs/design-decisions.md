@@ -6,6 +6,39 @@ implemented; the implementation checklist is the spec for the later execution ba
 
 ---
 
+## ADR-007 — Landing layout: dated run batches + recursive discovery; `reference/` for shared inputs
+
+- **Status:** Accepted — implemented 2026-06-26.
+- **Date:** 2026-06-26
+
+### Context
+
+Run fixtures sat loose at the top of `ingestion_sample/`, and `seed_storage` only walked the
+top level (non-recursive) — so a curated drop of new runs couldn't be grouped or seeded as a
+unit. Meanwhile the two *shared, non-run-scoped* inputs lived apart: `questions.jsonl` beside
+the run files, corpus profiles under their own `corpus/` prefix (ADR-004).
+
+### Decision
+
+- **Run files live in dated batch subdirs** (e.g. `20260626T173352Z/`); discovery is
+  **recursive** (run_id → manifest path). A new batch is a drop-in directory, no code change.
+  In object storage the batch dirs **flatten under the `runs/` prefix** (run_ids are unique) —
+  batches are local ergonomics, not a storage-key scheme.
+- **Shared inputs co-locate under one `reference/` prefix/subdir** — `questions.jsonl` *and*
+  corpus profiles, joined at transform time. This renames the ADR-004 `corpus/` prefix →
+  `reference/` and env var `S3_CORPUS_PREFIX` → `S3_REFERENCE_PREFIX` (default `reference/`).
+
+### Consequences
+
+- Future run batches drop in without touching ingestion code; the two shared inputs are
+  catalogued together by grain rather than scattered.
+- Supersedes the `corpus/`-prefix implementation detail of ADR-004 (the `dim_corpus`
+  enrichment decision itself is unchanged).
+- `corpus_profile` discovery globs `*.json` under `reference/`; `questions.jsonl` is `.jsonl`,
+  so it's excluded by suffix and the two never collide.
+
+---
+
 ## ADR-006 — Regenerate the model-pricing seed from `portkey-ai/models` (refresh-to-seed, not live fetch)
 
 - **Status:** Accepted (pending) — its own execution batch. Independent of ADR-003/004.
@@ -221,6 +254,11 @@ current volume, so the answer stays full-rebuild.
   delivery CR (publish the profile to the landing prefix) is still open — it gates the **cloud**
   path only; local runs on the seeded `corpus/` fixtures.
 - **Date:** 2026-06-24 (implemented 2026-06-25)
+- **Amendment (2026-06-26):** the corpus-profile landing prefix moved from `corpus/` to a
+  shared **`reference/`** prefix (now also holding `questions.jsonl`); env var
+  `S3_CORPUS_PREFIX` → `S3_REFERENCE_PREFIX`. The enrichment decision below is unchanged —
+  only the prefix name. The Status line and checklist items below mentioning `corpus/`
+  record the original execution; see **ADR-007** for the layout reorg.
 
 ### Implementation notes (two corrections to the checklist, decided during execution)
 

@@ -73,7 +73,7 @@ per build:
 | `<run_id>.manifest.json` | one per run | generator, judge, corpus, timestamp |
 | `<run_id>.jsonl` | one line per (run, question) | the scored answer + polymorphic `traversal_info` |
 | `questions.jsonl` | shared | question type, hop-count, ground truth, template |
-| `<corpus_build_id>.json` | one per corpus build | graph/vector size metrics; landed under the `corpus/` prefix, joined to `dim_corpus` |
+| `<corpus_build_id>.json` | one per corpus build | graph/vector size metrics; landed under the shared `reference/` prefix, joined to `dim_corpus` |
 
 `traversal_info` is **schema-on-read**: its keys vary by retrieval mechanism (`dense`,
 `neighborhood`, `sparqlgen`) and is empty `{}` on closed-book and older/error records.
@@ -388,8 +388,8 @@ flowchart LR
     subgraph S3["object storage (S3 / MinIO)"]
         f1["run_id.manifest.json"]
         f2["run_id.jsonl"]
-        f3["questions.jsonl"]
-        f4["corpus_build_id.json<br/>(corpus/ prefix)"]
+        f3["questions.jsonl<br/>(reference/ prefix)"]
+        f4["corpus_build_id.json<br/>(reference/ prefix)"]
     end
 
     subgraph RAW["raw schema - JSONB, as-landed (ingestion)"]
@@ -448,11 +448,14 @@ The field-level routing:
 ```bash
 make setup       # venv + deps + .env + dbt profile
 make pipeline    # up (postgres+minio) → seed → ingest → dbt build
-make dashboard   # Streamlit at http://localhost:8501 (direct-connect to marts)
+make dashboard   # Streamlit v1 at :8501, v2 at :8502 (direct-connect to marts)
 ```
 
 `make pipeline` is the offline reproducibility check: `docker compose` + the committed
-`ingestion_sample/` fixtures run the whole chain with no AWS account.
+`ingestion_sample/` fixtures run the whole chain with no AWS account. Fixtures are
+organized as dated **run batches** (`ingestion_sample/<batch>/`, discovered recursively)
+plus a **`reference/`** dir holding the shared, non-run-scoped inputs (`questions.jsonl`
++ corpus profiles); see ADR-007.
 
 Useful individual targets: `make up`, `make seed`, `make ingest`, `make dbt`,
 `make test`, `make lint`, `make parse`, `make airflow`. Run `make help`.
@@ -472,7 +475,7 @@ ephemeral Postgres + MinIO service containers: lint → unit tests → seed → 
 
 ## Verification status
 
-Validated in this repo: the ingestion logic against all **81 runs / 3,461 records / 2 corpus
+Validated in this repo: the ingestion logic against all **91 runs / 4,041 records / 2 corpus
 profiles** of the real fixtures (including the empty-`traversal_info`, error-row, and
 null-graph-count smoke edge cases), the unit suite, `ruff`, and `dbt parse`
 (Jinja/refs/contracts). The full `dbt build` run
