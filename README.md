@@ -19,13 +19,20 @@ latency, on which question types?*
 
 ## Architecture
 
-```
-S3 / MinIO            ingestion          Postgres (raw)        dbt                          marts          dashboard
-run files       →   extract + load   →   raw.* (JSONB)    →  staging → intermediate → fct/dim   →   Streamlit (direct,
- .jsonl  +                                                   (flatten, conform,           (star +        read-only role
- .manifest.json                                              EXPLODE traversal_info)       cost)          on marts schema)
- questions.jsonl
-                                  ── orchestrated by Airflow (optional) ──
+```mermaid
+flowchart LR
+    S["S3 / MinIO<br/>run files + questions.jsonl"]
+    I["ingestion<br/>extract + load"]
+    R["Postgres<br/>raw.* (JSONB, as-is)"]
+    D["dbt<br/>staging → intermediate → marts<br/>EXPLODE traversal_info"]
+    M["marts<br/>star + cost"]
+    DASH["dashboard<br/>Streamlit (direct, read-only)"]
+
+    S --> I --> R --> D --> M --> DASH
+
+    AF(["Airflow DAG (optional)"])
+    AF -.-> I
+    AF -.-> D
 ```
 
 - **Extract/Load** (`ingestion/`): pull run files from object storage, land them in a
