@@ -46,6 +46,7 @@ select
     a.retriever,
     t.mechanism,
     t.writer_model,
+    t.writer_model_family,
     t.embed_model,
     t.endpoint,
 

@@ -6,12 +6,14 @@
 with observed as (
     select
         writer_model,
+        writer_model_family,
         writer_temperature
     from {{ ref('int_scored_answers_enriched') }}
-    group by writer_model, writer_temperature
+    group by writer_model, writer_model_family, writer_temperature
 )
 select
     {{ surrogate_key(['writer_model', 'writer_temperature']) }} as writer_sk,
     writer_model,
+    writer_model_family,
     writer_temperature
 from observed

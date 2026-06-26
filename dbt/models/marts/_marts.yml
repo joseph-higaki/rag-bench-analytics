@@ -140,6 +140,10 @@ models:
               arguments:
                 values: [0, 1, 2, 3]
                 quote: false
+      - name: question_text
+        description: The question prompt as posed to the generator (verbatim from questions.jsonl).
+      - name: ground_truth_answer_text
+        description: Ground-truth answer rendered readable; array answers joined ', ' (provenance in ground_truth_json).
 
   - name: dim_generator
     description: Distinct generator configs (provider × model_id × temperature); model_id conformed.
@@ -168,6 +172,8 @@ models:
     columns:
       - name: writer_sk
         tests: [not_null, unique]
+      - name: writer_model_family
+        description: Writer model rolled up to its family (snapshot stripped, via model_family macro); null for the null-writer member.
 
   - name: dim_scoring
     description: Scoring types. Grain scoring.

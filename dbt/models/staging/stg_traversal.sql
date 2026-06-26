@@ -48,6 +48,7 @@ select
 
     -- sparqlgen (writer LLM) measures / attributes
     ti ->> 'writer_model'                                       as writer_model,
+    {{ model_family("ti ->> 'writer_model'") }}                 as writer_model_family,
     (ti ->> 'writer_temperature')::numeric                      as writer_temperature,
     (ti ->> 'writer_input_tokens')::bigint                      as writer_input_tokens,
     (ti ->> 'writer_output_tokens')::bigint                     as writer_output_tokens,
