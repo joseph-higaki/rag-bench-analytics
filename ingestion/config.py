@@ -32,9 +32,9 @@ class StorageConfig:
     region: str
     landing_bucket: str
     landing_prefix: str
-    # Corpus profiles share the landing bucket but a separate prefix: different grain
-    # (one per corpus build, shared across runs) and lifecycle (content-addressed).
-    corpus_prefix: str
+    # Shared reference inputs (questions.jsonl + corpus profiles) share the landing bucket
+    # but a separate prefix: not run-scoped — joined at transform time, one set across runs.
+    reference_prefix: str
 
     @classmethod
     def from_env(cls) -> StorageConfig:
@@ -50,7 +50,7 @@ class StorageConfig:
             region=os.environ.get("AWS_REGION", "us-east-1"),
             landing_bucket=os.environ.get("S3_LANDING_BUCKET", "rag-bench-landing"),
             landing_prefix=os.environ.get("S3_LANDING_PREFIX", "runs/"),
-            corpus_prefix=os.environ.get("S3_CORPUS_PREFIX", "corpus/"),
+            reference_prefix=os.environ.get("S3_REFERENCE_PREFIX", "reference/"),
         )
 
 
