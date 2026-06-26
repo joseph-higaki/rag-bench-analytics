@@ -325,6 +325,32 @@ def render_harness_evolution(df: pd.DataFrame) -> None:
     )
 
 
+def render_token_usage(df: pd.DataFrame) -> None:
+    """Avg total tokens per answered question, by question type × retriever (generator=haiku).
+
+    Averaged per answer, never summed: a type with 8 questions shouldn't look costlier than a
+    4-question type just for having more of them — the per-question cost is what's comparable.
+    total tokens = input + output across the generator and (for SPARQL-gen) the writer.
+    Retriever is the series because it dominates token cost (closed-book is cheap, graph is not),
+    so pooling retrievers into one line would blend away the very thing worth seeing.
+    """
+    keep = df[
+        (df["generator_model_family"] == HAIKU_FAMILY)
+        & (~df["retriever"].isin(LEGACY_RETRIEVERS))
+    ]
+    st.subheader("Token usage — avg total tokens per answered question")
+    st.caption(
+        f"Generator fixed to **{HAIKU_FAMILY}**, writers pooled, legacy retriever excluded.  \n"
+        "Total tokens = input + output across generator + SPARQL writer, **averaged per "
+        "answered question** so differing question counts per type don't distort the cost."
+    )
+    cells = accuracy_cells(keep, row="display_label", col="type_id")
+    st.altair_chart(
+        series_line_chart(cells, "display_label", "Retriever condition", TOKENS_METRIC),
+        use_container_width=True,
+    )
+
+
 def main() -> None:
     st.set_page_config(page_title="Biomedical RAG Bench — Analytics v2", layout="wide")
     st.title("Biomedical RAG Bench — Retriever Analytics v2")
@@ -339,6 +365,8 @@ def main() -> None:
     render_accuracy_matrix2(df)
     st.divider()
     render_harness_evolution(df)
+    st.divider()
+    render_token_usage(df)
 
 
 if __name__ == "__main__":
