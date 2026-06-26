@@ -72,7 +72,7 @@ def test_traversal_info_polymorphism_is_tolerated(storage: LocalStorage):
 
 
 def test_discovers_corpus_profiles(storage: LocalStorage):
-    """Corpus profiles live in the corpus/ subdir, keyed by corpus_build_id (the filename)."""
+    """Corpus profiles live in the reference/ subdir, keyed by corpus_build_id (the filename)."""
     ids = storage.list_corpus_build_ids()
     assert ids, "no corpus profiles discovered"
     for corpus_build_id in ids:

@@ -62,32 +62,33 @@ only sanctioned boundary, which is exactly why this gap blocks the cloud path.
 ## The ask
 
 At publish time, upload the run's corpus-profile JSON to the landing bucket under the
-corpus prefix, keyed by `corpus_build_id`:
+shared reference prefix, keyed by `corpus_build_id`:
 
 ```
-s3://<landing-bucket>/<corpus-prefix>/<corpus_build_id>.json
+s3://<landing-bucket>/<reference-prefix>/<corpus_build_id>.json
 ```
 
-For the reference consumer config that is:
+For the reference consumer config that is (the `reference/` prefix also holds
+`questions.jsonl` — both are shared, non-run-scoped inputs; ADR-007):
 
 ```
-s3://rag-bench-landing/corpus/full-2c102cb0.json
-s3://rag-bench-landing/corpus/smoke-30c621e8.json
+s3://rag-bench-landing/reference/full-2c102cb0.json
+s3://rag-bench-landing/reference/smoke-30c621e8.json
 ```
 
-Layout for context (runs and corpus profiles share the bucket, different prefixes —
-different grain: profile is per-corpus, runs are per-run):
+Layout for context (run files vs shared reference inputs sit under different prefixes by
+grain: profiles/questions are shared across runs, run files are per-run):
 
 ```
 s3://rag-bench-landing/
-├── runs/      <run_id>.jsonl + <run_id>.manifest.json   (per run)
-└── corpus/    <corpus_build_id>.json                     (per corpus, shared across runs)
+├── runs/        <run_id>.jsonl + <run_id>.manifest.json   (per run; local batch dirs flatten here)
+└── reference/   <corpus_build_id>.json + questions.jsonl  (shared across runs)
 ```
 
 ## Acceptance criteria
 
 - [ ] Publishing a run uploads `ingest/corpus/<corpus_build_id>.json` (the id from the
-      run manifest) to `<landing-bucket>/<corpus-prefix>/<corpus_build_id>.json`.
+      run manifest) to `<landing-bucket>/<reference-prefix>/<corpus_build_id>.json`.
 - [ ] Object filename is exactly `<corpus_build_id>.json` — no timestamp, no run id.
 - [ ] Upload is **idempotent / re-publish-safe**: many runs share one corpus build id;
       re-uploading the same id is a no-op or harmless overwrite (the id is
@@ -97,7 +98,7 @@ s3://rag-bench-landing/
 - [ ] Honest nulls preserved: smoke-scale graph counts stay `null` with the `source`
       note (no endpoint to count against) — do **not** backfill or fabricate.
 - [ ] The destination prefix is configurable (the consumer reads it via
-      `S3_CORPUS_PREFIX`, default `corpus/`).
+      `S3_REFERENCE_PREFIX`, default `reference/`).
 
 ## Out of scope (explicitly not asked)
 
