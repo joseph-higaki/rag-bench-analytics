@@ -1,7 +1,7 @@
 # One-word entrypoints. Host-run tooling (ingest/dbt) talks to the compose stack over
 # localhost; the stack itself is `docker compose`. `make pipeline` is the offline
 # reproducibility check (CLAUDE.md rule #4).
-.PHONY: help up down logs seed ingest dbt dashboard pipeline test lint parse setup clean airflow
+.PHONY: help up down logs seed ingest dbt dashboard dashboard_v1 dashboard_v2 pipeline test lint parse setup clean airflow
 
 # Load .env if present so every target sees the same config.
 ifneq (,$(wildcard .env))
@@ -42,8 +42,15 @@ ingest:  ## Extract from object storage + load into raw Postgres (idempotent)
 dbt:  ## dbt build = run + test (same models everywhere; target via DBT_TARGET)
 	cd $(DBTDIR) && $(abspath $(DBT)) build --target $${DBT_TARGET:-local}
 
-dashboard:  ## Run the Streamlit dashboard locally (direct-connect to marts, read-only role)
-	$(VENV)/bin/streamlit run dashboard/app.py
+dashboard_v1:  ## v1 dashboard (port 8501)
+	$(VENV)/bin/streamlit run dashboard/app.py --server.port 8501
+
+dashboard_v2:  ## v2 dashboard (port 8502)
+	$(VENV)/bin/streamlit run dashboard/app_v2.py --server.port 8502
+
+dashboard:  ## Launch both dashboards in background (v1=8501, v2=8502)
+	$(VENV)/bin/streamlit run dashboard/app.py --server.port 8501 &
+	$(VENV)/bin/streamlit run dashboard/app_v2.py --server.port 8502 &
 
 pipeline: up seed ingest dbt  ## Full chain end-to-end (offline reproducibility check)
 	@echo "pipeline complete — run 'make dashboard' to view"
