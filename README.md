@@ -19,6 +19,16 @@ latency, on which question types?*
 
 ## Architecture
 
+<details open>
+<summary><b>Image diagram</b></summary>
+
+![alt text](<rag bench analytics data pipeline architecture.png>)
+
+</details>
+
+<details>
+<summary><b>Mermaid diagram</b></summary>
+
 ```mermaid
 flowchart LR
     S["S3 / MinIO<br/>run files + questions.jsonl"]
@@ -35,6 +45,10 @@ flowchart LR
     AF -.-> D
 ```
 
+</details>
+
+
+
 - **Extract/Load** (`ingestion/`): pull run files from object storage, land them in a
   `raw` schema as JSONB, as-is. Idempotent, keyed by `run_id`. No transformation.
 - **Transform** (`dbt/`): `staging → intermediate → marts`. The schema morph lives here.
@@ -44,6 +58,10 @@ flowchart LR
   fallback; see ADR-001.)
 - **Orchestrate** (`airflow/`): a DAG runs the same chain. Optional — `make pipeline`
   runs it without Airflow.
+
+## Dashboard Screenshot
+
+![alt text](rag-bench-analytics-dashboard-screenshot-draft.png)  
 
 ## The source contract (what actually arrives)
 
