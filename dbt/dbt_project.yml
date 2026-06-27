@@ -41,4 +41,15 @@ seeds:
         output_usd_per_mtok: numeric
         cache_read_usd_per_mtok: numeric
         cache_write_usd_per_mtok: numeric
+    seed_pricing_local_overrides:
+      +column_types:
+        input_usd_per_mtok: numeric
+        output_usd_per_mtok: numeric
+        cache_read_usd_per_mtok: numeric
+        cache_write_usd_per_mtok: numeric
+    # Header-only scaffold today: pin types so an empty seed isn't inferred as integer (text = int join error).
+    seed_pricing_model_alias:
+      +column_types:
+        portkey_model_key: text
+        model_resolved: text
 

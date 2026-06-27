@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 
 from .config import StorageConfig
-from .storage import MANIFEST_SUFFIX, RECORDS_SUFFIX, REFERENCE_SUBDIR
+from .storage import MANIFEST_SUFFIX, PRICING_SUBDIR, RECORDS_SUFFIX, REFERENCE_SUBDIR
 
 log = logging.getLogger("ingestion.seed_storage")
 
@@ -74,6 +74,20 @@ def main() -> int:
     log.info(
         "seeded %d reference files into s3://%s/%s",
         len(reference_files), cfg.landing_bucket, reference_prefix,
+    )
+
+    # External pricing snapshots (e.g. Portkey pricing/<provider>.json) land in their own
+    # subdir/prefix so corpus discovery (any reference/*.json) doesn't pick them up.
+    pricing_dir = reference_dir / PRICING_SUBDIR
+    pricing_prefix = f"{reference_prefix}{PRICING_SUBDIR}/"
+    pricing_files = (
+        sorted(p for p in pricing_dir.iterdir() if p.is_file()) if pricing_dir.is_dir() else []
+    )
+    for p in pricing_files:
+        s3.upload_file(str(p), cfg.landing_bucket, f"{pricing_prefix}{p.name}")
+    log.info(
+        "seeded %d pricing snapshots into s3://%s/%s",
+        len(pricing_files), cfg.landing_bucket, pricing_prefix,
     )
     return 0
 

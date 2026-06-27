@@ -1,0 +1,47 @@
+{
+  "claude-haiku-4-5-20251001": {
+    "pricing_config": {
+      "pay_as_you_go": {
+        "request_token": { "price": 0.0001 },
+        "response_token": { "price": 0.0005 },
+        "cache_write_input_token": { "price": 0.000125 },
+        "cache_read_input_token": { "price": 0.00001 },
+        "additional_units": { "cache_write_1h": { "price": 0.0002 } }
+      },
+      "batch_config": {
+        "request_token": { "price": 0.00005 },
+        "response_token": { "price": 0.00025 }
+      }
+    }
+  },
+  "claude-haiku-4-5": {
+    "pricing_config": {
+      "pay_as_you_go": {
+        "request_token": { "price": 0.0001 },
+        "response_token": { "price": 0.0005 },
+        "cache_write_input_token": { "price": 0.000125 },
+        "cache_read_input_token": { "price": 0.00001 },
+        "additional_units": { "cache_write_1h": { "price": 0.0002 } }
+      },
+      "batch_config": {
+        "request_token": { "price": 0.00005 },
+        "response_token": { "price": 0.00025 }
+      }
+    }
+  },
+  "claude-3-5-haiku-20241022": {
+    "pricing_config": {
+      "pay_as_you_go": {
+        "request_token": { "price": 0.00008 },
+        "response_token": { "price": 0.0004 },
+        "cache_read_input_token": { "price": 0.000008 },
+        "cache_write_input_token": { "price": 0.0001 },
+        "additional_units": { "cache_write_1h": { "price": 0.00016 } }
+      },
+      "batch_config": {
+        "request_token": { "price": 0.00004 },
+        "response_token": { "price": 0.0002 }
+      }
+    }
+  }
+}

@@ -52,6 +52,13 @@ CREATE TABLE IF NOT EXISTS {schema}.corpus_profile (
     loaded_at       timestamptz NOT NULL DEFAULT now(),
     payload         jsonb NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS {schema}.model_pricing (
+    provider    text PRIMARY KEY,
+    source_uri  text NOT NULL,
+    loaded_at   timestamptz NOT NULL DEFAULT now(),
+    payload     jsonb NOT NULL
+);
 """
 
 
@@ -124,13 +131,36 @@ def load_corpus_profiles(conn: psycopg.Connection, storage: Storage, schema: str
     return count
 
 
+def load_pricing_snapshots(conn: psycopg.Connection, storage: Storage, schema: str) -> int:
+    """Land each external model-pricing snapshot (e.g. Portkey pricing/<provider>.json), keyed by
+    provider. Idempotent upsert: a refreshed snapshot replaces the provider's row. This is the first
+    *non-benchmark* reference input — stored whole (schema-on-read), then flattened + unit-converted
+    (cents/token -> usd_per_mtok) in stg_model_pricing_portkey."""
+    count = 0
+    for provider in storage.list_pricing_providers():
+        payload = storage.read_pricing_snapshot(provider)
+        source_uri = storage.pricing_source_uri(provider)
+        conn.execute(
+            f"INSERT INTO {schema}.model_pricing (provider, source_uri, payload) "
+            f"VALUES (%s, %s, %s) "
+            f"ON CONFLICT (provider) DO UPDATE SET "
+            f"source_uri = EXCLUDED.source_uri, payload = EXCLUDED.payload, loaded_at = now()",
+            (provider, source_uri, Json(payload)),
+        )
+        count += 1
+    log.info("loaded %d model-pricing snapshots", count)
+    return count
+
+
 def run(cfg: PostgresConfig, storage: Storage) -> dict[str, int]:
-    """Land questions + corpus profiles + every discovered run. Returns counts for logging/tests."""
-    counts = {"runs": 0, "records": 0, "questions": 0, "corpus_profiles": 0}
+    """Land questions + corpus profiles + pricing snapshots + every discovered run. Returns counts
+    for logging/tests."""
+    counts = {"runs": 0, "records": 0, "questions": 0, "corpus_profiles": 0, "pricing_snapshots": 0}
     with psycopg.connect(cfg.conninfo, autocommit=True) as conn:
         ensure_schema(conn, cfg.raw_schema)
         counts["questions"] = load_questions(conn, storage, cfg.raw_schema)
         counts["corpus_profiles"] = load_corpus_profiles(conn, storage, cfg.raw_schema)
+        counts["pricing_snapshots"] = load_pricing_snapshots(conn, storage, cfg.raw_schema)
         for run_id in storage.list_run_ids():
             counts["records"] += load_run(conn, storage, cfg.raw_schema, run_id)
             counts["runs"] += 1

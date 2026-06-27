@@ -9,14 +9,21 @@ models:
 
   - name: int_model_pricing
     description: >
-      Conformed token-pricing contract and the single pricing swap point. Today a passthrough
-      over seed_model_pricing; later a source dispatcher (seed | portkey) behind var('pricing_source').
-      Rates normalized to USD per 1M tokens — any source-specific unit conversion (e.g. Portkey's
-      cents/token) happens HERE, never downstream. Unmatched models -> NULL cost downstream, never fabricated.
+      Conformed token-pricing contract and the single pricing swap point. Source selected by
+      var('pricing_source') (default 'seed' for offline reproducibility): 'seed' = curated in-repo
+      table; 'portkey' = flattened Portkey snapshot UNION a curated override for models Portkey can't
+      price (local $0). Rates are USD per 1M tokens (unit conversion happens upstream in
+      stg_model_pricing_portkey, never here). Unmatched models -> NULL cost downstream, never fabricated.
     columns:
       - name: model_resolved
         tests: [not_null, unique]   # current grain; gains effective_date when SCD pricing lands
       - name: rate_unit
         tests:
           - accepted_values:
-              values: ['usd_per_mtok']
+              arguments:
+                values: ['usd_per_mtok']
+      - name: pricing_source
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['seed', 'portkey', 'override']

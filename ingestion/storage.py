@@ -31,6 +31,10 @@ QUESTIONS_NAME = "questions.jsonl"
 # under their own prefix/subdir — not run-keyed; joined at transform time.
 REFERENCE_SUBDIR = "reference"
 CORPUS_SUFFIX = ".json"
+# External (non-benchmark) reference inputs land under reference/<PRICING_SUBDIR>/ — e.g. model
+# token-pricing catalogs (Portkey's pricing/<provider>.json). Kept in a subdir so corpus discovery
+# (which treats any reference/*.json as a corpus build) doesn't swallow them.
+PRICING_SUBDIR = "pricing"
 
 
 def _iter_jsonl(text: str) -> Iterator[dict]:
@@ -53,6 +57,9 @@ class Storage(Protocol):
     def list_corpus_build_ids(self) -> list[str]: ...
     def corpus_source_uri(self, corpus_build_id: str) -> str: ...
     def read_corpus_profile(self, corpus_build_id: str) -> dict: ...
+    def list_pricing_providers(self) -> list[str]: ...
+    def pricing_source_uri(self, provider: str) -> str: ...
+    def read_pricing_snapshot(self, provider: str) -> dict: ...
 
 
 class LocalStorage:
@@ -66,6 +73,7 @@ class LocalStorage:
         if not self.root.is_dir():
             raise FileNotFoundError(f"LOCAL_SOURCE_DIR does not exist: {self.root}")
         self.reference_dir = self.root / REFERENCE_SUBDIR
+        self.pricing_dir = self.reference_dir / PRICING_SUBDIR
         # run_id -> manifest path (recursive; reference/ excluded). A run's .jsonl is the
         # manifest's sibling in the same batch dir.
         self._manifests: dict[str, Path] = {
@@ -108,6 +116,18 @@ class LocalStorage:
             (self.reference_dir / f"{corpus_build_id}{CORPUS_SUFFIX}").read_text()
         )
 
+    def list_pricing_providers(self) -> list[str]:
+        # One snapshot file per provider (reference/pricing/<provider>.json); stem = provider.
+        if not self.pricing_dir.is_dir():
+            return []
+        return sorted(p.stem for p in self.pricing_dir.glob(f"*{CORPUS_SUFFIX}"))
+
+    def pricing_source_uri(self, provider: str) -> str:
+        return (self.pricing_dir / f"{provider}{CORPUS_SUFFIX}").resolve().as_uri()
+
+    def read_pricing_snapshot(self, provider: str) -> dict:
+        return json.loads((self.pricing_dir / f"{provider}{CORPUS_SUFFIX}").read_text())
+
 
 class S3Storage:
     """Reads run files from S3 (or MinIO via endpoint_url). Same Protocol as LocalStorage."""
@@ -120,6 +140,7 @@ class S3Storage:
         self.reference_prefix = (
             cfg.reference_prefix.rstrip("/") + "/" if cfg.reference_prefix else ""
         )
+        self.pricing_prefix = f"{self.reference_prefix}{PRICING_SUBDIR}/"
         self._s3 = boto3.client(
             "s3",
             endpoint_url=cfg.endpoint_url,  # None => real AWS
@@ -175,6 +196,8 @@ class S3Storage:
         for page in paginator.paginate(Bucket=self.bucket, Prefix=self.reference_prefix):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
+                if key.startswith(self.pricing_prefix):
+                    continue  # external pricing snapshots live under reference/pricing/, not corpus
                 if key.endswith(CORPUS_SUFFIX):
                     name = key[len(self.reference_prefix):]
                     ids.append(name[: -len(CORPUS_SUFFIX)])
@@ -187,6 +210,25 @@ class S3Storage:
         obj = self._s3.get_object(
             Bucket=self.bucket,
             Key=f"{self.reference_prefix}{corpus_build_id}{CORPUS_SUFFIX}",
+        )
+        return json.loads(obj["Body"].read().decode("utf-8"))
+
+    def list_pricing_providers(self) -> list[str]:
+        paginator = self._s3.get_paginator("list_objects_v2")
+        providers: list[str] = []
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=self.pricing_prefix):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if key.endswith(CORPUS_SUFFIX):
+                    providers.append(key[len(self.pricing_prefix): -len(CORPUS_SUFFIX)])
+        return sorted(providers)
+
+    def pricing_source_uri(self, provider: str) -> str:
+        return f"s3://{self.bucket}/{self.pricing_prefix}{provider}{CORPUS_SUFFIX}"
+
+    def read_pricing_snapshot(self, provider: str) -> dict:
+        obj = self._s3.get_object(
+            Bucket=self.bucket, Key=f"{self.pricing_prefix}{provider}{CORPUS_SUFFIX}"
         )
         return json.loads(obj["Body"].read().decode("utf-8"))
 

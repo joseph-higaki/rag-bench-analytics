@@ -15,6 +15,28 @@ seeds:
       - name: output_usd_per_mtok
         tests: [not_null]
 
+  - name: seed_pricing_local_overrides
+    description: >
+      Curated prices for models the Portkey catalog structurally can't supply (local Ollama
+      inference = $0). Always unioned into int_model_pricing under pricing_source=portkey; override
+      wins over a Portkey row for the same model. Same columns as seed_model_pricing.
+    columns:
+      - name: model_resolved
+        tests: [not_null, unique]
+      - name: input_usd_per_mtok
+        tests: [not_null]
+      - name: output_usd_per_mtok
+        tests: [not_null]
+
+  - name: seed_pricing_model_alias
+    description: >
+      Crosswalk from a Portkey model key to the benchmark's model_resolved, for when the two diverge.
+      Empty scaffold today (our hosted model key matches verbatim); stg_model_pricing_portkey falls
+      back to identity when no row matches.
+    columns:
+      - name: portkey_model_key
+        tests: [not_null, unique]
+
   - name: seed_retriever_labels
     description: Conforms each retriever string to a family + display label for dim_retriever_cond.
     columns:

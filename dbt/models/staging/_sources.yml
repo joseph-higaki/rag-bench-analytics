@@ -42,3 +42,13 @@ sources:
         columns:
           - name: corpus_build_id
             tests: [not_null, unique]
+      - name: model_pricing
+        description: >
+          External (non-benchmark) model token-pricing snapshots — one row per provider, payload
+          is the upstream catalog as-is (Portkey's pricing/<provider>.json). The first non-benchmark
+          input; flattened + unit-converted (cents/token -> usd_per_mtok) in stg_model_pricing_portkey.
+        # No freshness: third-party reference, refreshed out-of-band (~monthly), not per run.
+        freshness: null
+        columns:
+          - name: provider
+            tests: [not_null, unique]
