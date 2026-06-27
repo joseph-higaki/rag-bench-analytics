@@ -365,6 +365,72 @@ def render_token_usage(df: pd.DataFrame) -> None:
     )
 
 
+def render_latency_split(df: pd.DataFrame) -> None:
+    """DRAFT — retrieval vs generation latency per retriever condition (generator=haiku).
+
+    Stacked bars split each condition's avg wall-clock into its two phases: retrieval (the
+    retriever fetching context) and generation (the LLM answering). Generator is held fixed
+    so the split is attributable to the retriever — closed-book pays ~0 retrieval, graph
+    conditions pay for traversal, and generation tracks the context the retriever fed it.
+    Each phase is averaged over its non-null answers (error rows emit no latency and are
+    skipped), so a bar is the typical breakdown, not a coalesced-to-0 sum.
+    """
+    keep = df[
+        (df["generator_model_family"] == HAIKU_FAMILY)
+        & (~df["retriever"].isin(LEGACY_RETRIEVERS))
+    ]
+    st.subheader("🚧 DRAFT · Latency — retrieval vs generation by retriever condition")
+    st.caption(
+        f"Generator fixed to **{HAIKU_FAMILY}**, legacy retriever excluded · stacked bar = "
+        "avg retrieval + avg generation latency (ms) per condition.  \n"
+        "_Draft for review — phases averaged over answers that emitted latency (errors skipped)._"
+    )
+
+    by_cond = keep.groupby("display_label", as_index=False).agg(
+        Retrieval=("retrieval_latency_ms", "mean"),
+        Generation=("generation_latency_ms", "mean"),
+        n=("scored_answer_sk", "size"),
+    )
+    long = by_cond.melt(
+        id_vars=["display_label", "n"],
+        value_vars=["Retrieval", "Generation"],
+        var_name="phase",
+        value_name="avg_latency_ms",
+    )
+    # Pin stack/legend order so Retrieval is always the first (left) segment.
+    long["phase_order"] = long["phase"].map({"Retrieval": 0, "Generation": 1})
+
+    chart = (
+        alt.Chart(long)
+        .mark_bar()
+        .encode(
+            x=alt.X("avg_latency_ms:Q", title="Avg latency (ms)", stack="zero"),
+            y=alt.Y(
+                "display_label:N",
+                title="Retriever condition",
+                sort=alt.EncodingSortField("avg_latency_ms", op="sum", order="descending"),
+            ),
+            color=alt.Color(
+                "phase:N",
+                title="Phase",
+                sort=["Retrieval", "Generation"],
+                scale=alt.Scale(
+                    domain=["Retrieval", "Generation"], range=["#4c78a8", "#f58518"]
+                ),
+            ),
+            order=alt.Order("phase_order:Q"),
+            tooltip=[
+                alt.Tooltip("display_label:N", title="Retriever condition"),
+                alt.Tooltip("phase:N", title="Phase"),
+                alt.Tooltip("avg_latency_ms:Q", title="Avg latency (ms)", format=",.0f"),
+                alt.Tooltip("n:Q", title="Answers"),
+            ],
+        )
+        .properties(height=alt.Step(40))
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
 def main() -> None:
     st.set_page_config(page_title="Biomedical RAG Bench — Analytics v2", layout="wide")
     st.title("Biomedical RAG Bench — Retriever Analytics v2")
@@ -381,6 +447,8 @@ def main() -> None:
     render_harness_evolution(df)
     st.divider()
     render_token_usage(df)
+    st.divider()
+    render_latency_split(df)
 
 
 if __name__ == "__main__":
