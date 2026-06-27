@@ -1,0 +1,11 @@
+type_id,type_family,display_label,description
+01_0hop_attribute,lookup,Attribute lookup (0-hop),"Direct attribute of one named entity; no relationship traversal (e.g. the chromosome a gene sits on)."
+02_1hop_factoid,traversal,Factoid (1-hop),"Single relationship step out from a seed entity (e.g. genes expressed in an anatomy)."
+03_2hop_traversal,traversal,Traversal (2-hop),"Two chained relationship steps from a seed entity (e.g. genes linked to the diseases a drug treats)."
+04_3plus_hop_traversal,traversal,Traversal (3+ hop),"Three or more chained steps; the deepest multi-hop reasoning in the bank."
+05_aggregative,aggregation,Aggregative count,"Count or aggregate over a neighborhood (e.g. how many side effects a compound has)."
+06_set_intersection,set_op,Set intersection,"Entities common to two seeds (e.g. pathways both genes participate in)."
+07_set_difference,set_op,Set difference,"Entities of one seed excluding another (e.g. pathways of gene A that gene B lacks)."
+08_negative_unanswerable,negative,Negative / unanswerable,"Ground truth is the empty set; tests refusal to invent a relationship that does not exist."
+09_path_existence,boolean,Path existence,"Yes/no whether a path connects two entities through an intermediate node."
+10_fuzzy_semantic,semantic,Fuzzy semantic,"Underspecified description that must be resolved to an entity; answer judged semantically, not by exact match."

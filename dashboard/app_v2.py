@@ -209,12 +209,26 @@ def render_ground_truth(dim_q: pd.DataFrame) -> None:
     examples["ground_truth_answer_text"] = examples["ground_truth_answer_text"].fillna(
         "— (unanswerable)"
     )
+    # Labels come from seed_question_type_labels; fall back to the raw id if a type is
+    # unseeded so the grid never goes blank. type_id stays as the compact "Type" column —
+    # it's the join key the accuracy heatmaps below put on their axes.
+    examples["type_display_label"] = examples["type_display_label"].fillna(examples["type_id"])
+    examples["type_description"] = examples["type_description"].fillna("—")
 
     display = examples[
-        ["type_id", "n_questions", "question_text", "ground_truth_answer_text"]
+        [
+            "type_id",
+            "type_display_label",
+            "type_description",
+            "n_questions",
+            "question_text",
+            "ground_truth_answer_text",
+        ]
     ].rename(
         columns={
-            "type_id": "Question type",
+            "type_id": "Type",
+            "type_display_label": "Question type",
+            "type_description": "What it tests",
             "n_questions": "# questions",
             "question_text": "Question example",
             "ground_truth_answer_text": "Ground truth example",

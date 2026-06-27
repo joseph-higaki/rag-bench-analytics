@@ -26,3 +26,12 @@ seeds:
     columns:
       - name: scoring
         tests: [not_null, unique]
+
+  - name: seed_question_type_labels
+    description: >
+      Conforms each question type_id to a family, short display label, and human description
+      for dim_question (the dashboard's per-type explanation). type_id is the benchmark's own
+      ordered naming convention (e.g. 03_2hop_traversal); rows must track the question bank.
+    columns:
+      - name: type_id
+        tests: [not_null, unique]
