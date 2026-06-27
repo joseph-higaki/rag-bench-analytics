@@ -406,16 +406,16 @@ def render_latency_split(df: pd.DataFrame) -> None:
 def render_pricing_reference(dim_pricing: pd.DataFrame) -> None:
     """Reference + provenance: the token prices behind every cost figure above.
 
-    Reads dim_token_pricing (the conformed pricing dim, fed by the int_model_pricing swap point).
-    Prices are USD per 1M tokens; each row's source (seed | portkey | override) is shown so a cost
-    is traceable to its rate. No computation here — cost is precomputed in dbt; this only displays
-    the inputs (rule #2: the dashboard reads marts, it doesn't price).
+    Reads dim_token_pricing (the conformed pricing dim, fed by int_model_pricing). Prices are USD
+    per 1M tokens; each row's source (portkey | override) is shown so a cost is traceable to its
+    rate. No computation here — cost is precomputed in dbt; this only displays the inputs (rule #2:
+    the dashboard reads marts, it doesn't price).
     """
     st.subheader("Model token pricing — reference & provenance")
     sources = ", ".join(sorted(dim_pricing["pricing_source"].dropna().unique())) or "—"
     st.caption(
         f"USD per 1M tokens · source of record: **{sources}** "
-        "(swap with `dbt build --vars pricing_source=portkey`).  \n"
+        "(Portkey snapshot, refreshed by `make refresh-pricing`; override for local Ollama).  \n"
         "These are the rates behind the cost figures above — cost is computed in dbt, not here."
     )
     display = dim_pricing.sort_values(["provider", "model_resolved"])[

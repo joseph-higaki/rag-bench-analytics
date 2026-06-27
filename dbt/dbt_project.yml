@@ -41,12 +41,6 @@ seeds:
     # one-off --full-refresh. This config triggers it on every invocation — CLI, Cosmos,
     # local, cloud — so all paths self-heal uniformly (no orchestrated-only runbook step).
     +full_refresh: true
-    seed_model_pricing:
-      +column_types:
-        input_usd_per_mtok: numeric
-        output_usd_per_mtok: numeric
-        cache_read_usd_per_mtok: numeric
-        cache_write_usd_per_mtok: numeric
     seed_pricing_local_overrides:
       +column_types:
         input_usd_per_mtok: numeric

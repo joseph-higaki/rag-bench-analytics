@@ -41,8 +41,47 @@ the run files, corpus profiles under their own `corpus/` prefix (ADR-004).
 
 ## ADR-006 — Regenerate the model-pricing seed from `portkey-ai/models` (refresh-to-seed, not live fetch)
 
-- **Status:** Accepted (pending) — its own execution batch. Independent of ADR-003/004.
-- **Date:** 2026-06-24
+- **Status:** Accepted — **implemented 2026-06-27, as amended below.** Portkey is the *sole* pricing
+  source (no swap, no seed); the fetch is a soft-fail Airflow task; the committed snapshot is the
+  offline fallback.
+- **Date:** 2026-06-24 (amended + implemented 2026-06-27)
+
+### Amendment (2026-06-27) — Portkey is the sole source; fetch coupled into the DAG; seed deleted
+
+The original "refresh-to-seed" decision (#1: Portkey *regenerates* the committed
+`seed_model_pricing.csv`, which stays the only pricing relation) was superseded **twice** in
+execution. The landed design:
+
+- **Portkey is the only pricing source — no `pricing_source` toggle.** `int_model_pricing` is
+  unconditionally `stg_model_pricing_portkey` (the landed snapshot: `raw.model_pricing` → flatten →
+  cents/token ×1e4 → USD/Mtok) UNION `seed_pricing_local_overrides` (Ollama = $0, which a hosted-API
+  catalog structurally can't carry). The brief intermediate `var('pricing_source')` swap point was
+  removed as false optionality (same reasoning as ADR-001's `SERVE_MODE` removal): a different
+  source is added the normal way — a new raw source + staging model — not a var.
+- **The hand-curated `seed_model_pricing.csv` is deleted.** Its only non-Portkey value (qwen's $0)
+  already lives in the override seed, so it was pure redundancy. `seed_pricing_local_overrides`
+  (Ollama $0) and `seed_pricing_model_alias` (identity crosswalk) remain. Decisions #2 (unit
+  conversion at the boundary), #3 (identity matching), #4 (honest NULLs) are unchanged.
+- **The snapshot is self-describing.** `refresh_pricing` writes `{"meta": {...}, "models": <portkey>}`
+  to `reference/pricing/<provider>.json`; `meta.fetched_at` dates the prices honestly (surfaced as
+  `effective_date`/`source_note` in staging — stable across re-ingests, unlike load time). The
+  committed 2026-06-27 snapshot is the **offline artifact the repo defaults to**.
+- **The fetch is coupled into the DAG (soft-fail), but never the build.** New `fetch_prices` task
+  (`analytics_pipeline`) refreshes the landed snapshot before extract/load; on any failure (no
+  network, Portkey down, schema drift) it raises `AirflowSkipException` and downstream runs anyway
+  (`trigger_rule="none_failed"`) on the **last-landed snapshot**. `make refresh-pricing` writes the
+  committed git fixture for local; the DAG task writes the landed snapshot to S3 via the storage
+  abstraction (`write_pricing_snapshot`). The build path stays offline (golden rule #4, sharpened):
+  no `dbt build` / `make pipeline` step ever fetches.
+- **Cost of deleting the seed:** the `assert_portkey_reconciles_seed` tripwire (caught a silent
+  change in Portkey's cents→USD unit by cross-checking the curated seed) is **gone** — there's no
+  longer a second source to reconcile against. `refresh_pricing.validate_shape` catches *structural*
+  drift (renamed/missing price path) but not a silent unit rescale. Accepted as the price of one
+  source.
+- **Deferred next increment** (decision #5, "cadence"): **SCD2 price history** — accumulate each
+  fetch (timestamped, don't overwrite) and build a `valid_from`/`valid_to` pricing dim keyed on
+  (provider, model_resolved, rate tuple). `meta.fetched_at` is the seam it keys on. Not built; the
+  snapshot's sorted git diff is the interim record.
 
 ### Context
 
@@ -112,8 +151,13 @@ prices + cache operations — a direct mapping onto the seed's four price column
 
 ### Implementation checklist (the execution plan)
 
+> Superseded by the 2026-06-27 amendment — the as-built design lands a Portkey *snapshot* behind
+> `int_model_pricing` rather than regenerating the CSV. Kept as the original plan-of-record; the
+> amendment is the authority for what shipped.
+
 _Refresh script (out-of-band; the only new moving part)_
-- [ ] `ingestion/refresh_pricing.py` + `make refresh-pricing`: fetch
+- [x] `ingestion/refresh_pricing.py` + `make refresh-pricing` (writes the committed
+      `reference/pricing/<provider>.json` snapshot, **not** the CSV — see amendment): fetch
       `configs.portkey.ai/pricing/{provider}.json` for the providers in use; **convert
       cents/token → USD/Mtok (×10⁴)**; map Portkey model ids → `model_resolved`; write
       `dbt/seeds/seed_model_pricing.csv`; stamp `source_note = portkey-ai/models @ <commit|date>`.

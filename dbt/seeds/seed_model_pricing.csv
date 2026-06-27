@@ -1,3 +1,0 @@
-provider,model_resolved,input_usd_per_mtok,output_usd_per_mtok,cache_read_usd_per_mtok,cache_write_usd_per_mtok,effective_date,source_note
-anthropic,claude-haiku-4-5-20251001,1.00,5.00,0.10,1.25,2026-01-01,Anthropic list price Haiku 4.5; cache_write=5min TTL (1.25x input)
-ollama,qwen2.5:3b-instruct,0.00,0.00,0.00,0.00,2026-01-01,Local Ollama inference; no per-token cost (compute is amortized hardware)

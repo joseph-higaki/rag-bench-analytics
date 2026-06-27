@@ -60,6 +60,7 @@ class Storage(Protocol):
     def list_pricing_providers(self) -> list[str]: ...
     def pricing_source_uri(self, provider: str) -> str: ...
     def read_pricing_snapshot(self, provider: str) -> dict: ...
+    def write_pricing_snapshot(self, provider: str, snapshot: dict) -> str: ...
 
 
 class LocalStorage:
@@ -127,6 +128,13 @@ class LocalStorage:
 
     def read_pricing_snapshot(self, provider: str) -> dict:
         return json.loads((self.pricing_dir / f"{provider}{CORPUS_SUFFIX}").read_text())
+
+    def write_pricing_snapshot(self, provider: str, snapshot: dict) -> str:
+        # Sorted+indented to match the refresh CLI's git-fixture format (price-only diffs).
+        path = self.pricing_dir / f"{provider}{CORPUS_SUFFIX}"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
+        return path.resolve().as_uri()
 
 
 class S3Storage:
@@ -231,6 +239,18 @@ class S3Storage:
             Bucket=self.bucket, Key=f"{self.pricing_prefix}{provider}{CORPUS_SUFFIX}"
         )
         return json.loads(obj["Body"].read().decode("utf-8"))
+
+    def write_pricing_snapshot(self, provider: str, snapshot: dict) -> str:
+        # The DAG fetch_prices task lands a fresh snapshot here; load_raw then ingests it like any
+        # other landed input. No git involved in cloud — object storage is the source of record.
+        key = f"{self.pricing_prefix}{provider}{CORPUS_SUFFIX}"
+        self._s3.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=(json.dumps(snapshot, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+            ContentType="application/json",
+        )
+        return f"s3://{self.bucket}/{key}"
 
 
 def get_storage(cfg: StorageConfig) -> Storage:

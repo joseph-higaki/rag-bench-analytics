@@ -379,15 +379,18 @@ erDiagram
   `dim_retriever_cond`, not the fact. The marts contract enforces column types — the dashboard binds to them.
 - Seven dimensions: `dim_run`, `dim_question`, `dim_retriever_cond` (the compared variable),
   `dim_generator`, `dim_writer` (the SPARQL-writer LLM config), `dim_scoring`, `dim_corpus`.
-- The **cost-per-token** join is an *external* seed (`seed_model_pricing.csv`) — the
-  prices are maintained here, not produced by the benchmark. Cost = tokens × price for
-  both the answering LLM and the SPARQL-writer LLM; local (Ollama) models cost $0.
+- The **cost-per-token** prices come from an *external* source — the [Portkey-AI/models]
+  (https://github.com/Portkey-AI/models) catalog, landed as a snapshot like any other input
+  (`reference/pricing/<provider>.json` → `raw.model_pricing` → `stg_model_pricing_portkey`),
+  refreshed out-of-band by `make refresh-pricing`. A small curated override supplies models
+  Portkey structurally can't price (local Ollama = $0). Cost = tokens × price for both the
+  answering LLM and the SPARQL-writer LLM; unpriced models yield NULL cost (never fabricated).
 
 ### The schema morph
 
 The transform lives in staging. Note the fan-out: `raw.scored_answer` feeds **two** staging
 models — the top-level flatten (`stg_scored_answers`) and the `traversal_info` explode
-(`stg_traversal`) — which rejoin in intermediate alongside the external pricing seed:
+(`stg_traversal`) — which rejoin in intermediate alongside the flattened pricing snapshot:
 
 ```mermaid
 flowchart LR
@@ -396,6 +399,7 @@ flowchart LR
         f2["run_id.jsonl"]
         f3["questions.jsonl<br/>(reference/ prefix)"]
         f4["corpus_build_id.json<br/>(reference/ prefix)"]
+        f5["anthropic.json<br/>(reference/pricing/ — Portkey snapshot)"]
     end
 
     subgraph RAW["raw schema - JSONB, as-landed (ingestion)"]
@@ -403,6 +407,7 @@ flowchart LR
         r2[raw.scored_answer]
         r3[raw.question]
         r4[raw.corpus_profile]
+        r5[raw.model_pricing]
     end
 
     subgraph STG["staging - flatten, cast, EXPLODE"]
@@ -411,9 +416,10 @@ flowchart LR
         s3[stg_traversal]
         s4[stg_questions]
         s5[stg_corpus_profile]
+        s6[stg_model_pricing_portkey]
     end
 
-    SEED[["seed_model_pricing<br/>external, user-maintained"]]
+    OVR[["pricing override + alias seeds<br/>(Ollama $0, identity map)"]]
     INT[int_scored_answers_enriched]
     M["marts star<br/>fct + 7 dims"]
 
@@ -421,18 +427,21 @@ flowchart LR
     f2 --> r2
     f3 --> r3
     f4 --> r4
+    f5 --> r5
 
     r1 --> s1
     r2 --> s2
     r2 -->|"EXPLODE traversal_info<br/>mechanism-aware branch"| s3
     r3 --> s4
     r4 --> s5
+    r5 --> s6
 
     s1 --> INT
     s2 --> INT
     s3 --> INT
     s4 --> INT
-    SEED -->|"cost = tokens x price"| INT
+    s6 -->|"cost = tokens x price"| INT
+    OVR -->|"∪ override; alias map"| INT
 
     INT --> M
     s5 -->|"left join on corpus_build_id"| M

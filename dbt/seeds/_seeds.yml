@@ -1,25 +1,12 @@
 version: 2
 
 seeds:
-  - name: seed_model_pricing
-    description: >
-      The external cost-per-token table (user-maintained, NOT from the benchmark).
-      Joined on (provider, model_resolved) to compute cost_usd in the fact. Prices are
-      per 1M tokens; keep effective_date current when list prices change. Unmatched
-      models yield NULL cost (acceptable sparsity).
-    columns:
-      - name: model_resolved
-        tests: [not_null, unique]
-      - name: input_usd_per_mtok
-        tests: [not_null]
-      - name: output_usd_per_mtok
-        tests: [not_null]
-
   - name: seed_pricing_local_overrides
     description: >
       Curated prices for models the Portkey catalog structurally can't supply (local Ollama
-      inference = $0). Always unioned into int_model_pricing under pricing_source=portkey; override
-      wins over a Portkey row for the same model. Same columns as seed_model_pricing.
+      inference = $0). Always unioned into int_model_pricing; override wins over a Portkey row for
+      the same model. Columns: provider, model_resolved, the four *_usd_per_mtok rates,
+      effective_date, source_note.
     columns:
       - name: model_resolved
         tests: [not_null, unique]

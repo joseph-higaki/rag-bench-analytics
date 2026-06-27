@@ -1,7 +1,7 @@
 # One-word entrypoints. Host-run tooling (ingest/dbt) talks to the compose stack over
 # localhost; the stack itself is `docker compose`. `make pipeline` is the offline
 # reproducibility check (CLAUDE.md rule #4).
-.PHONY: help up down logs seed ingest dbt dashboard dashboard_v1 dashboard_v2 pipeline test lint parse setup clean airflow
+.PHONY: help up down logs seed ingest dbt dashboard dashboard_v1 dashboard_v2 pipeline test lint parse setup clean airflow refresh-pricing
 
 # Load .env if present so every target sees the same config.
 ifneq (,$(wildcard .env))
@@ -38,6 +38,9 @@ seed:  ## Upload sample run files into MinIO landing bucket
 
 ingest:  ## Extract from object storage + load into raw Postgres (idempotent)
 	$(PY) -m ingestion
+
+refresh-pricing:  ## Refresh committed Portkey pricing snapshots from the public internet (out-of-band; OFF the pipeline path). PROVIDERS="anthropic ..." to add; default refreshes existing.
+	$(PY) -m ingestion.refresh_pricing $(PROVIDERS)
 
 dbt:  ## dbt build = run + test (same models everywhere; target via DBT_TARGET)
 	cd $(DBTDIR) && $(abspath $(DBT)) build --target $${DBT_TARGET:-local}

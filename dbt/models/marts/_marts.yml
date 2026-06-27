@@ -242,10 +242,10 @@ models:
   - name: dim_token_pricing
     description: >
       Model token-pricing catalog as a conformed dimension (ADR-003). Grain (provider,
-      model_resolved); contents follow the pricing swap point int_model_pricing, so they change
-      with var('pricing_source'). Rates are USD per 1M tokens; pricing_source carries per-row
-      provenance (seed | portkey | override). The fact's generator_pricing_sk / writer_pricing_sk
-      reference pricing_sk (null for unpriced models). Reference data, not contracted.
+      model_resolved); contents come from int_model_pricing (the Portkey snapshot ∪ override).
+      Rates are USD per 1M tokens; pricing_source carries per-row provenance (portkey | override).
+      The fact's generator_pricing_sk / writer_pricing_sk reference pricing_sk (null for unpriced
+      models). Reference data, not contracted.
     columns:
       - name: pricing_sk
         tests: [not_null, unique]
@@ -260,4 +260,4 @@ models:
         tests:
           - accepted_values:
               arguments:
-                values: ['seed', 'portkey', 'override']
+                values: ['portkey', 'override']
