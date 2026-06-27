@@ -101,6 +101,9 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
       POSTGRES_HOST: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-analytics}
+      # UI admin login, pre-created by the command below (see note there).
+      AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -109,9 +112,21 @@ services:
       - ./dbt:/opt/airflow/dbt              # read-write: dbt writes to target/ and logs/
     # Ensure profiles.yml exists (make setup creates it on the host; this covers
     # the case where someone starts Airflow before running make setup).
+    # Seed the admin login from AIRFLOW_ADMIN_* BEFORE `airflow standalone`, which
+    # otherwise mints its own *random* password when no "admin" user exists (verified
+    # in create_admin_standalone). Two steps, because `users create` exits 0 on an
+    # existing user and so CANNOT update a password: `create` guarantees the user
+    # exists (fresh volume), then `reset-password` authoritatively sets it to the .env
+    # value on EVERY boot — even a pre-existing volume that already holds a random-
+    # password admin. `$$` escapes compose interpolation so the in-container shell
+    # expands it; `|| true` keeps the chain going to standalone. Username must stay
+    # "admin" to match standalone's hardcoded check.
     command: >-
       bash -c "cp -n /opt/airflow/dbt/profiles.example.yml /opt/airflow/dbt/profiles.yml 2>/dev/null || true
-      && airflow db migrate && airflow standalone"
+      && airflow db migrate
+      && (airflow users create --role Admin --username \"$${AIRFLOW_ADMIN_USER}\" --password \"$${AIRFLOW_ADMIN_PASSWORD}\" --firstname admin --lastname user --email admin@example.com || true)
+      && (airflow users reset-password --username \"$${AIRFLOW_ADMIN_USER}\" --password \"$${AIRFLOW_ADMIN_PASSWORD}\" || true)
+      && airflow standalone"
 
 volumes:
   postgres-data:
