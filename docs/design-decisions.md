@@ -6,6 +6,80 @@ implemented; the implementation checklist is the spec for the later execution ba
 
 ---
 
+## ADR-008 — Pricing coverage: local models cost $0 by *rule*; unknown models stay NULL but surface in a coverage catalog
+
+- **Status:** Accepted (pending) — **future build, not implemented.** The implementation checklist
+  is the spec for the later batch. Today's stopgap (this batch): the local-model `$0` is still the
+  hand-enumerated `seed_pricing_local_overrides` (now `qwen2.5:3b-instruct` + `qwen2.5:3b-coder`).
+- **Date:** 2026-06-27
+
+### Context
+
+Cost joins `int_model_pricing` on `model_resolved` (left join, `int_scored_answers_enriched`). An
+unmatched model yields **NULL** cost, NULL `*_pricing_sk`, and no `dim_token_pricing` row — and NULL
+**silently vanishes** from aggregations (`SUM` skips it; `AVG` drops it from numerator *and*
+denominator; cost-coverage and per-slice views understate). Trigger: adding `qwen2.5:3b-coder`
+alongside `qwen2.5:3b-instruct` — the coder variant matched nothing (not in Portkey, not in the
+override) and went NULL, though it is a local model that genuinely costs $0.
+
+Two classes of "unmatched" are conflated today:
+
+- **Known-free local (Ollama):** genuinely $0. Priced only via hand-enumerated override rows, so
+  every new local tag silently → NULL until someone adds a row. Fragile, doesn't scale.
+- **Unknown hosted (e.g. an OpenAI model not yet in the catalog):** true cost *unknown*. NULL is
+  honest but silent.
+
+### Decision
+
+1. **Local models cost $0 by a *rule*, not enumeration.** Identify local by `provider = 'ollama'`
+   (or an `is_local` predicate) and price it $0 by construction — a new `qwen`/`llama` tag is free
+   with no hand-added row. Replaces the per-tag override rows for *local* models. **Constraint:**
+   preserve the null-FK-⇔-null-cost invariant (ADR-003) — local-zero needs a `dim_token_pricing`
+   member to FK to (a single synthetic "local Ollama" pricing row, or generated per-observed-local
+   rows), **not** a bare coalesce-to-0 that leaves `pricing_sk` NULL while cost is 0.
+2. **Unknown (non-local) unmatched models stay NULL.** Never fabricate a price — honest-null
+   preserved (golden rule; ADR-006 #4). **Rejected the blanket "unmatched → 0"** alternative: it
+   fabricates $0 for a genuinely-expensive hosted model, understating the headline cost metric —
+   *worse* than NULL (a confident wrong number vs an honest abstention).
+3. **New coverage catalog** surfaces every observed model absent from pricing — this is what removes
+   the "silent NULL" problem (the real complaint behind wanting 0). One row per observed
+   `(provider, model_resolved)` with no pricing match, plus usage measures (answers, total tokens,
+   first/last seen). Ollama entries → signal "extend the local rule"; hosted entries → signal "add a
+   real price." It is the coverage **worklist** + a dashboard panel.
+   - **Shape:** a coverage/audit relation, **not** a conformed star dimension (nothing in the star
+     FKs to it). Lean fct-like with usage measures (e.g. `fct_pricing_coverage_gap`) or a simple
+     `audit_unpriced_models` — decide at build time.
+
+### Consequences
+
+- (+) Local models free by construction; no per-tag maintenance.
+- (+) Coverage gaps visible + actionable; honest-NULL stops meaning *silent*.
+- (+) Honest-null invariant preserved for genuinely-unknown prices.
+- (−) The local rule needs a dim member to keep the null-FK invariant (synthetic/generated row), not
+  just a coalesce — more than a one-liner.
+- (−) New marts/monitoring relation + a dashboard panel — net surface, justified by coverage
+  visibility.
+- Until built: local `$0` rides the enumerated override (instruct + coder); a new local tag is NULL
+  until added. Unknown hosted already behaves as decided (NULL).
+
+### Implementation checklist (the future-build spec)
+
+- [ ] **Local-zero by rule:** price `provider='ollama'`/`is_local` models at $0 without per-tag rows;
+      keep a `dim_token_pricing` member so `generator_pricing_sk`/`writer_pricing_sk` stay non-null
+      for local (null-FK-⇔-null-cost holds). Retire the local rows in `seed_pricing_local_overrides`
+      once the rule covers them (keep the seed only for genuine curated exceptions).
+- [ ] **Coverage catalog:** new marts relation = observed generator/writer models (from the fact /
+      `int_`) LEFT JOIN `int_model_pricing`, keep the misses; add usage measures.
+- [ ] **Tests:** the catalog must be empty of *local* models once the rule lands (a local model in
+      it = the rule missed it); hosted entries are expected (the worklist).
+- [ ] **Dashboard:** a "pricing coverage" panel reading the catalog (rule #2: marts only).
+- [ ] **Docs:** update the cost-pricing memory + README cost note when built.
+
+**Anti-goal (rejected):** blanket "unmatched → 0" — fabricates cost for unknown hosted models. The
+catalog, not a fake 0, is the answer to silent NULLs.
+
+---
+
 ## ADR-007 — Landing layout: dated run batches + recursive discovery; `reference/` for shared inputs
 
 - **Status:** Accepted — implemented 2026-06-26.
@@ -41,8 +115,47 @@ the run files, corpus profiles under their own `corpus/` prefix (ADR-004).
 
 ## ADR-006 — Regenerate the model-pricing seed from `portkey-ai/models` (refresh-to-seed, not live fetch)
 
-- **Status:** Accepted (pending) — its own execution batch. Independent of ADR-003/004.
-- **Date:** 2026-06-24
+- **Status:** Accepted — **implemented 2026-06-27, as amended below.** Portkey is the *sole* pricing
+  source (no swap, no seed); the fetch is a soft-fail Airflow task; the committed snapshot is the
+  offline fallback.
+- **Date:** 2026-06-24 (amended + implemented 2026-06-27)
+
+### Amendment (2026-06-27) — Portkey is the sole source; fetch coupled into the DAG; seed deleted
+
+The original "refresh-to-seed" decision (#1: Portkey *regenerates* the committed
+`seed_model_pricing.csv`, which stays the only pricing relation) was superseded **twice** in
+execution. The landed design:
+
+- **Portkey is the only pricing source — no `pricing_source` toggle.** `int_model_pricing` is
+  unconditionally `stg_model_pricing_portkey` (the landed snapshot: `raw.model_pricing` → flatten →
+  cents/token ×1e4 → USD/Mtok) UNION `seed_pricing_local_overrides` (Ollama = $0, which a hosted-API
+  catalog structurally can't carry). The brief intermediate `var('pricing_source')` swap point was
+  removed as false optionality (same reasoning as ADR-001's `SERVE_MODE` removal): a different
+  source is added the normal way — a new raw source + staging model — not a var.
+- **The hand-curated `seed_model_pricing.csv` is deleted.** Its only non-Portkey value (qwen's $0)
+  already lives in the override seed, so it was pure redundancy. `seed_pricing_local_overrides`
+  (Ollama $0) and `seed_pricing_model_alias` (identity crosswalk) remain. Decisions #2 (unit
+  conversion at the boundary), #3 (identity matching), #4 (honest NULLs) are unchanged.
+- **The snapshot is self-describing.** `refresh_pricing` writes `{"meta": {...}, "models": <portkey>}`
+  to `reference/pricing/<provider>.json`; `meta.fetched_at` dates the prices honestly (surfaced as
+  `effective_date`/`source_note` in staging — stable across re-ingests, unlike load time). The
+  committed 2026-06-27 snapshot is the **offline artifact the repo defaults to**.
+- **The fetch is coupled into the DAG (soft-fail), but never the build.** New `fetch_prices` task
+  (`analytics_pipeline`) refreshes the landed snapshot before extract/load; on any failure (no
+  network, Portkey down, schema drift) it raises `AirflowSkipException` and downstream runs anyway
+  (`trigger_rule="none_failed"`) on the **last-landed snapshot**. `make refresh-pricing` writes the
+  committed git fixture for local; the DAG task writes the landed snapshot to S3 via the storage
+  abstraction (`write_pricing_snapshot`). The build path stays offline (golden rule #4, sharpened):
+  no `dbt build` / `make pipeline` step ever fetches.
+- **Cost of deleting the seed:** the `assert_portkey_reconciles_seed` tripwire (caught a silent
+  change in Portkey's cents→USD unit by cross-checking the curated seed) is **gone** — there's no
+  longer a second source to reconcile against. `refresh_pricing.validate_shape` catches *structural*
+  drift (renamed/missing price path) but not a silent unit rescale. Accepted as the price of one
+  source.
+- **Deferred next increment** (decision #5, "cadence"): **SCD2 price history** — accumulate each
+  fetch (timestamped, don't overwrite) and build a `valid_from`/`valid_to` pricing dim keyed on
+  (provider, model_resolved, rate tuple). `meta.fetched_at` is the seam it keys on. Not built; the
+  snapshot's sorted git diff is the interim record.
 
 ### Context
 
@@ -112,8 +225,13 @@ prices + cache operations — a direct mapping onto the seed's four price column
 
 ### Implementation checklist (the execution plan)
 
+> Superseded by the 2026-06-27 amendment — the as-built design lands a Portkey *snapshot* behind
+> `int_model_pricing` rather than regenerating the CSV. Kept as the original plan-of-record; the
+> amendment is the authority for what shipped.
+
 _Refresh script (out-of-band; the only new moving part)_
-- [ ] `ingestion/refresh_pricing.py` + `make refresh-pricing`: fetch
+- [x] `ingestion/refresh_pricing.py` + `make refresh-pricing` (writes the committed
+      `reference/pricing/<provider>.json` snapshot, **not** the CSV — see amendment): fetch
       `configs.portkey.ai/pricing/{provider}.json` for the providers in use; **convert
       cents/token → USD/Mtok (×10⁴)**; map Portkey model ids → `model_resolved`; write
       `dbt/seeds/seed_model_pricing.csv`; stamp `source_note = portkey-ai/models @ <commit|date>`.

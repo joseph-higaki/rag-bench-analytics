@@ -32,8 +32,12 @@ Producer → consumer boundary (do not blur it):
    *unbuilt* Community-Cloud fallback (ADR-001 amended 2026-06-25), not a live path.
 3. **Same dbt models everywhere.** Local vs cloud differ only by dbt *target* and
    environment variables — not by separate model code.
-4. **Local must run fully offline and reproducibly**: `docker compose up` + sample
-   fixtures → the whole pipeline runs with no AWS account.
+4. **The build critical path stays offline + reproducible.** `docker compose up` +
+   committed fixtures → `make pipeline` runs with no cloud account and no public-internet
+   access (local MinIO *is* the S3 stand-in — reaching it is not an external dependency).
+   **Out-of-band refresh steps may reach the public internet** (e.g. `make refresh-pricing`
+   pulls the upstream Portkey catalog) but they write a *committed snapshot* and never sit on
+   the `make pipeline` path. "Offline" is a property of the build, not a claim no step fetches.
 5. **Secrets via env only** (`.env`, never committed; `.env.example` documents
    them). No credentials in code, dbt models, or DAGs.
 6. **Cost discipline is a feature.** Every cloud component must justify itself in

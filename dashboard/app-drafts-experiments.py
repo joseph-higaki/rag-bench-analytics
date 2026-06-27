@@ -1,16 +1,14 @@
-"""Streamlit DRAFTS / experiments scratchpad — reads marts via the read-only role (rule #2).
+"""Streamlit DRAFTS / experiments scratchpad — reads marts via the read-only role.
 
-A testing surface for dashboard sections that aren't ready for the official app (`app_v2.py`):
-single-series or aspirational views that only become meaningful once more data lands (multiple
-writer families, harness v2/v3, etc.). Deliberately a **self-contained copy** of app_v2's
-loading + charting machinery — not an import — so chart code can be hacked on freely here
-without touching or breaking the official app. Promote a section back into app_v2 once it earns
-its place; let the two drift in the meantime.
+A testing surface for dashboard sections not yet ready for app_v2.py: single-series
+or aspirational views that only become meaningful once more data lands. Deliberately
+a self-contained copy of app_v2's loading + charting machinery — not an import — so
+chart code can be hacked on freely here without touching the official app.
 
-Currently parked here:
-  • Token usage & accuracy — per answered question   (dual-axis, retriever series)
-  • Harness-version evolution                          (dual-axis, single series until v2/v3)
-  • SPARQL-gen writer series — 2.1 line / 2.2 grouped bar (single writer family for now)
+Currently parked:
+  • Token usage & accuracy — per answered question (dual-axis, retriever series)
+  • Harness-version evolution (dual-axis, single series until v2/v3)
+  • SPARQL-gen writer series — 2.1 line / 2.2 grouped bar
 """
 
 from __future__ import annotations
@@ -32,10 +30,16 @@ HAIKU_FAMILY = "claude-haiku-4-5"
 # conditions; filtered out of comparisons as legacy noise.
 LEGACY_RETRIEVERS = ("graph_neighborhood",)
 
-# Y-measure for the single-axis per-question-type series charts (line + grouped bar, 2.1/2.2).
-# Accuracy is pinned to an absolute 0–100%; fmt is a Vega format. The dual-axis charts further
-# down carry accuracy *and* tokens together and don't go through this.
-ACCURACY_METRIC = {"field": "accuracy", "title": "Accuracy", "fmt": "%", "domain": [0, 1]}
+# Y-measure for the single-axis per-question-type series charts (line + grouped bar,
+# 2.1/2.2). Accuracy is pinned to an absolute 0–100%; fmt is a Vega format. The
+# dual-axis charts further down carry accuracy *and* tokens together and don't go
+# through this.
+ACCURACY_METRIC = {
+    "field": "accuracy",
+    "title": "Accuracy",
+    "fmt": "%",
+    "domain": [0, 1],
+}
 
 
 def _marts_conn() -> psycopg.Connection:
@@ -50,14 +54,17 @@ def _marts_conn() -> psycopg.Connection:
 
 @st.cache_data(ttl=300)
 def load_mart(table: str) -> pd.DataFrame:
-    # Build from the cursor, not pd.read_sql (which warns on a raw psycopg conn — it wants a
-    # SQLAlchemy engine we deliberately don't add). Postgres numeric -> Decimal; coerce to float
-    # to match read_sql's float64 dtype so downstream means/charts behave identically.
+    # Build from the cursor, not pd.read_sql (which warns on a raw psycopg conn — it
+    # wants a SQLAlchemy engine we deliberately don't add). Postgres numeric -> Decimal;
+    # coerce to float to match read_sql's float64 dtype so downstream means/charts behave
+    # identically.
     with _marts_conn() as conn:
         cur = conn.execute(f'select * from "{MARTS_SCHEMA}"."{table}"')
-        df = pd.DataFrame(cur.fetchall(), columns=[d.name for d in cur.description])
+        cols = [d.name for d in cur.description]
+        df = pd.DataFrame(cur.fetchall(), columns=cols)
     for col in df.columns:
-        if df[col].dtype == object and df[col].map(lambda v: isinstance(v, Decimal)).any():
+        has_decimal = df[col].map(lambda v: isinstance(v, Decimal)).any()
+        if df[col].dtype == object and has_decimal:
             df[col] = df[col].astype(float)
     return df
 
@@ -66,18 +73,26 @@ def load_mart(table: str) -> pd.DataFrame:
 def load_analysis() -> pd.DataFrame:
     """One denormalized fact for the scoring sections: fct + the dims each view slices on.
 
-    `passed` is the accuracy numerator at the row grain: is_passed==True → 1, else 0 — so a
-    null (ungraded) or errored answer counts as not-passed. Cell accuracy is then mean(passed)
-    = passed/total over the cell (the spec's count(is_passed=true)/total).
+    `passed` is the accuracy numerator at the row grain: is_passed==True → 1, else 0 — so
+    a null (ungraded) or errored answer counts as not-passed. Cell accuracy is then
+    mean(passed) = passed/total over the cell (the spec's count(is_passed=true)/total).
     """
     fct = load_mart("fct_scored_answer")
     dim_q = load_mart("dim_question")[
         ["question_sk", "type_id", "type_display_label", "question_hop_count"]
     ]
     dim_ret = load_mart("dim_retriever_cond")[
-        ["retriever_cond_sk", "display_label", "retriever", "mechanism", "sort_order"]
+        [
+            "retriever_cond_sk",
+            "display_label",
+            "retriever",
+            "mechanism",
+            "sort_order",
+        ]
     ]
-    dim_gen = load_mart("dim_generator")[["generator_sk", "generator_model_family"]]
+    dim_gen = load_mart("dim_generator")[
+        ["generator_sk", "generator_model_family"]
+    ]
     dim_writer = load_mart("dim_writer")[
         ["writer_sk", "writer_model", "writer_model_family"]
     ]
@@ -119,7 +134,9 @@ def accuracy_cells(df: pd.DataFrame, row: str, col: str) -> pd.DataFrame:
     return cells
 
 
-def _qtype_axis(cells: pd.DataFrame, col: str = "type_id") -> tuple[str, object]:
+def _qtype_axis(
+    cells: pd.DataFrame, col: str = "type_id"
+) -> tuple[str, object]:
     """(field, sort) for the question-type axis: show the display label, order by numbered type_id.
 
     Keeps the 01→10 question-type order (an explicit category list, since the labels themselves
@@ -137,7 +154,9 @@ def _qtype_axis(cells: pd.DataFrame, col: str = "type_id") -> tuple[str, object]
     return col, "ascending"
 
 
-def _retriever_axis(cells: pd.DataFrame, field: str = "display_label") -> tuple[str, object]:
+def _retriever_axis(
+    cells: pd.DataFrame, field: str = "display_label"
+) -> tuple[str, object]:
     """(field, sort) for the retriever axis: canonical order from sort_order (seed-driven)."""
     if "sort_order" in cells.columns and field in cells.columns:
         order = (
@@ -150,7 +169,12 @@ def _retriever_axis(cells: pd.DataFrame, field: str = "display_label") -> tuple[
     return field, "ascending"
 
 
-def _series_encodings(cells: pd.DataFrame, series_col: str, series_title: str, metric: dict) -> dict:
+def _series_encodings(
+        cells: pd.DataFrame, 
+        series_col: str, 
+        series_title: str, 
+        metric: dict
+    ) -> dict:
     """Shared x/y/color/tooltip for the per-question-type series charts (line + grouped bar).
 
     `metric` swaps the y-measure (accuracy vs tokens). color sort is pinned so the same
@@ -160,7 +184,10 @@ def _series_encodings(cells: pd.DataFrame, series_col: str, series_title: str, m
     if metric["domain"] is not None:
         y_kwargs["scale"] = alt.Scale(domain=metric["domain"])
     xf, xs = _qtype_axis(cells)
-    _, color_sort = _retriever_axis(cells, series_col) if series_col == "display_label" else (series_col, "ascending")
+    if series_col == "display_label":
+        _, color_sort = _retriever_axis(cells, series_col)
+    else:
+        color_sort = "ascending"
     return dict(
         x=alt.X(f"{xf}:N", title="Question type", sort=xs,
                 axis=alt.Axis(labelAngle=-45)),
@@ -177,7 +204,10 @@ def _series_encodings(cells: pd.DataFrame, series_col: str, series_title: str, m
 
 
 def series_line_chart(
-    cells: pd.DataFrame, series_col: str, series_title: str, metric: dict = ACCURACY_METRIC
+    cells: pd.DataFrame,
+    series_col: str,
+    series_title: str,
+    metric: dict = ACCURACY_METRIC,
 ) -> alt.Chart:
     """One line per `series_col` value vs question type, y = the chosen metric."""
     return alt.Chart(cells).mark_line(point=True).encode(
@@ -186,7 +216,10 @@ def series_line_chart(
 
 
 def series_grouped_bar_chart(
-    cells: pd.DataFrame, series_col: str, series_title: str, metric: dict = ACCURACY_METRIC
+    cells: pd.DataFrame,
+    series_col: str,
+    series_title: str,
+    metric: dict = ACCURACY_METRIC,
 ) -> alt.Chart:
     """Grouped bars per question type, one bar per `series_col` value, y = the chosen metric."""
     return alt.Chart(cells).mark_bar().encode(
@@ -201,23 +234,28 @@ def series_dual_axis_chart(
     """Accuracy (left axis, %) + avg tokens (right axis) on one chart, per question type.
 
     A deliberate dual axis: the two measures keep *independent* y-scales (resolve_scale
-    y='independent') so each fills the plot height — the "normalized" view that compares shape
-    without forcing two unrelated units onto one number line. colour = series; line style =
-    measure (solid accuracy / dashed tokens). Both axes are zero-anchored so the visual gap
-    between the lines isn't an artefact of a floating baseline. Caveat carried over from the
-    old metric-toggle: a dual axis can *imply* a correlation that isn't there — read each line
-    against its own axis, never against the other.
+    y='independent') so each fills the plot height — the "normalized" view that compares
+    shape without forcing two unrelated units onto one number line. colour = series;
+    line style = measure (solid accuracy / dashed tokens). Both axes are zero-anchored
+    so the visual gap between the lines isn't an artefact of a floating baseline. Caveat
+    carried over from the old metric-toggle: a dual axis can *imply* a correlation that
+    isn't there — read each line against its own axis, never against the other.
     """
     xf, xs = _qtype_axis(cells)
-    _, color_sort = _retriever_axis(cells, series_col) if series_col == "display_label" else (series_col, "ascending")
+    if series_col == "display_label":
+        _, color_sort = _retriever_axis(cells, series_col)
+    else:
+        color_sort = "ascending"
     x = alt.X(f"{xf}:N", title="Question type", sort=xs,
               axis=alt.Axis(labelAngle=-45))
     color = alt.Color(f"{series_col}:N", title=series_title, sort=color_sort)
-    # Solid vs dashed distinguishes the two measures; explicit domain pins the mapping so the
-    # accuracy layer is always solid regardless of layer/encoding order.
+    # Solid vs dashed distinguishes the two measures; explicit domain pins the mapping
+    # so the accuracy layer is always solid regardless of layer/encoding order.
     dash = alt.StrokeDash(
         "metric:N", title="Measure",
-        scale=alt.Scale(domain=["Accuracy", "Avg tokens"], range=[[1, 0], [5, 4]]),
+        scale=alt.Scale(
+            domain=["Accuracy", "Avg tokens"], range=[[1, 0], [5, 4]]
+        ),
     )
     tooltip = [
         alt.Tooltip(f"{xf}:N", title="Question type"),
@@ -265,14 +303,19 @@ def render_writer_series(df: pd.DataFrame) -> None:
         (df["generator_model_family"] == HAIKU_FAMILY)
         & (df["retriever"] == "graph_sparqlgen")
     ]
-    writers = ", ".join(sorted(sparql["writer_model_family"].dropna().unique())) or "—"
+    writer_families = sparql["writer_model_family"].dropna().unique()
+    writers = ", ".join(sorted(writer_families)) or "—"
 
     st.subheader("SPARQL-gen accuracy by writer model family — series views")
-    st.caption(
-        f"Graph SPARQL-generation retriever only · generator fixed to **{HAIKU_FAMILY}**.  \n"
-        f"Writer families present: {writers} (qwen is only a *generator*, never a writer).  \n"
-        "Accuracy = passed / total answers in the cell (errors & ungraded count as not-passed)."
+    caption = (
+        f"Graph SPARQL-generation retriever only · generator fixed to "
+        f"**{HAIKU_FAMILY}**.  \n"
+        f"Writer families present: {writers} (qwen is only a *generator*, never a "
+        "writer).  \n"
+        "Accuracy = passed / total answers in the cell (errors & ungraded count as "
+        "not-passed)."
     )
+    st.caption(caption)
 
     cells = accuracy_cells(sparql, row="writer_model_family", col="type_id")
 
@@ -290,12 +333,13 @@ def render_writer_series(df: pd.DataFrame) -> None:
 
 
 def render_harness_evolution(df: pd.DataFrame) -> None:
-    """Per-question-type accuracy + avg tokens across harness versions; generator+writer=haiku.
+    """Per-question-type accuracy + avg tokens across harness versions.
 
-    Accuracy (left axis, %) and avg tokens/answer (right axis) share one chart on independent,
-    zero-anchored scales (the "normalized" dual axis) so a version's quality and its cost read
-    together per question type. Series = harness version. Replaces the earlier accuracy/tokens
-    metric toggle — read each line against its own axis; their proximity isn't a correlation.
+    Accuracy (left axis, %) and avg tokens/answer (right axis) share one chart on
+    independent, zero-anchored scales (the "normalized" dual axis) so a version's
+    quality and its cost read together per question type. Series = harness version.
+    Replaces the earlier accuracy/tokens metric toggle — read each line against its
+    own axis; their proximity isn't a correlation.
     """
     keep = df[
         (df["generator_model_family"] == HAIKU_FAMILY)
@@ -308,17 +352,23 @@ def render_harness_evolution(df: pd.DataFrame) -> None:
     versions = sorted(keep["harness_version"].dropna().unique())
 
     st.subheader("Harness-version evolution")
-    st.caption(
-        f"Generator + writer fixed to **{HAIKU_FAMILY}**, retrieval conditions pooled · "
-        f"series = harness version (present: {', '.join(versions) or '—'}).  \n"
-        "Accuracy (left axis, %, solid) and avg total tokens/answer (right axis, dashed) on "
-        "independent zero-anchored scales — read each line against its own axis."
+    version_list = ', '.join(versions) or '—'
+    caption = (
+        f"Generator + writer fixed to **{HAIKU_FAMILY}**, retrieval conditions "
+        f"pooled · series = harness version (present: {version_list}).  \n"
+        "Accuracy (left axis, %, solid) and avg total tokens/answer (right axis, "
+        "dashed) on independent zero-anchored scales — read each line against its "
+        "own axis."
     )
+    st.caption(caption)
     if len(versions) < 2:
-        st.info(
-            f"Only **{versions[0] if versions else '—'}** is present — no evolution to plot yet. "
-            "This chart turns into a comparison automatically once harness-v2/v3 runs are ingested."
+        version_name = versions[0] if versions else '—'
+        message = (
+            f"Only **{version_name}** is present — no evolution to plot yet. "
+            "This chart turns into a comparison automatically once harness-v2/v3 "
+            "runs are ingested."
         )
+        st.info(message)
 
     cells = accuracy_cells(keep, row="harness_version", col="type_id")
     st.altair_chart(
@@ -328,28 +378,33 @@ def render_harness_evolution(df: pd.DataFrame) -> None:
 
 
 def render_token_usage(df: pd.DataFrame) -> None:
-    """Avg tokens (right axis) + accuracy (left axis) per question type × retriever; gen=haiku.
+    """Avg tokens (right axis) + accuracy (left axis) per question type × retriever.
 
-    Cost and quality on one dual-axis chart, independent zero-anchored scales (the "normalized"
-    view). Tokens are averaged per answer, never summed: a type with 8 questions shouldn't look
-    costlier than a 4-question type just for having more of them — per-question cost is what's
-    comparable. total tokens = input + output across the generator and (for SPARQL-gen) the
-    writer. Retriever is the series because it dominates token cost (closed-book is cheap, graph
-    is not); each condition gets a solid accuracy line and a dashed token line — read each
-    against its own axis, the two aren't a correlation.
+    Cost and quality on one dual-axis chart, independent zero-anchored scales (the
+    "normalized" view). Tokens are averaged per answer, never summed: a type with 8
+    questions shouldn't look costlier than a 4-question type just for having more of
+    them — per-question cost is what's comparable. total tokens = input + output
+    across the generator and (for SPARQL-gen) the writer. Retriever is the series
+    because it dominates token cost (closed-book is cheap, graph is not); each
+    condition gets a solid accuracy line and a dashed token line — read each against
+    its own axis, the two aren't a correlation.
     """
     keep = df[
         (df["generator_model_family"] == HAIKU_FAMILY)
         & (~df["retriever"].isin(LEGACY_RETRIEVERS))
     ]
     st.subheader("Token usage & accuracy — per answered question")
-    st.caption(
-        f"Generator fixed to **{HAIKU_FAMILY}**, writers pooled, legacy retriever excluded.  \n"
-        "Accuracy (left axis, %, solid) and total tokens = input + output across generator + "
-        "SPARQL writer (right axis, dashed), **averaged per answered question** so differing "
-        "question counts per type don't distort the comparison.  \n"
-        "_Dual axis: read each line against its own axis — proximity isn't correlation._"
+    caption = (
+        f"Generator fixed to **{HAIKU_FAMILY}**, writers pooled, legacy retriever "
+        "excluded.  \n"
+        "Accuracy (left axis, %, solid) and total tokens = input + output across "
+        "generator + SPARQL writer (right axis, dashed), **averaged per answered "
+        "question** so differing question counts per type don't distort the "
+        "comparison.  \n"
+        "_Dual axis: read each line against its own axis — proximity isn't "
+        "correlation._"
     )
+    st.caption(caption)
     cells = accuracy_cells(keep, row="display_label", col="type_id")
     st.altair_chart(
         series_dual_axis_chart(cells, "display_label", "Retriever condition"),
@@ -362,10 +417,12 @@ def main() -> None:
         page_title="Biomedical RAG Bench — Analytics (drafts/experiments)", layout="wide"
     )
     st.title("Biomedical RAG Bench — Drafts & experiments")
-    st.caption(
-        "Scratchpad for dashboard sections not yet promoted to the official app (`app_v2.py`). "
-        "Self-contained on purpose — hack freely; promote winners back when they earn it."
+    caption_text = (
+        "Scratchpad for dashboard sections not yet promoted to the official app "
+        "(`app_v2.py`). Self-contained on purpose — hack freely; promote winners "
+        "back when they earn it."
     )
+    st.caption(caption_text)
 
     df = load_analysis()
 

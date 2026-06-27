@@ -76,8 +76,8 @@ models:
   - name: stg_model_pricing_portkey
     description: >
       Portkey pricing snapshot flattened to one row per model, conformed to the pricing contract.
-      Cents/token -> usd_per_mtok (x1e4) happens here; pay_as_you_go tier only (batch ignored). The
-      singular test assert_portkey_reconciles_seed asserts these equal the curated seed where they overlap.
+      Reads the self-describing {meta, models} payload; cents/token -> usd_per_mtok (x1e4) happens
+      here; pay_as_you_go tier only (batch ignored). effective_date = meta.fetched_at (capture date).
     columns:
       - name: model_resolved
         tests: [not_null, unique]

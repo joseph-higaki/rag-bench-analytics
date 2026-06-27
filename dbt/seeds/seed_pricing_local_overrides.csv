@@ -1,2 +1,3 @@
 provider,model_resolved,input_usd_per_mtok,output_usd_per_mtok,cache_read_usd_per_mtok,cache_write_usd_per_mtok,effective_date,source_note
 ollama,qwen2.5:3b-instruct,0.00,0.00,0.00,0.00,2026-01-01,Local Ollama inference; Portkey cannot price local models (curated $0)
+ollama,qwen2.5:3b-coder,0.00,0.00,0.00,0.00,2026-01-01,Local Ollama inference; Portkey cannot price local models (curated $0)

@@ -9,11 +9,11 @@ models:
 
   - name: int_model_pricing
     description: >
-      Conformed token-pricing contract and the single pricing swap point. Source selected by
-      var('pricing_source') (default 'seed' for offline reproducibility): 'seed' = curated in-repo
-      table; 'portkey' = flattened Portkey snapshot UNION a curated override for models Portkey can't
-      price (local $0). Rates are USD per 1M tokens (unit conversion happens upstream in
-      stg_model_pricing_portkey, never here). Unmatched models -> NULL cost downstream, never fabricated.
+      Conformed token-pricing contract: the flattened Portkey snapshot (stg_model_pricing_portkey)
+      UNION a curated override for models Portkey can't price (local Ollama = $0). No source toggle —
+      a different source is added as a new raw source + staging model. Rates are USD per 1M tokens
+      (unit conversion happens upstream, never here). Unmatched models -> NULL cost downstream, never
+      fabricated.
     columns:
       - name: model_resolved
         tests: [not_null, unique]   # current grain; gains effective_date when SCD pricing lands
@@ -26,4 +26,4 @@ models:
         tests:
           - accepted_values:
               arguments:
-                values: ['seed', 'portkey', 'override']
+                values: ['portkey', 'override']
