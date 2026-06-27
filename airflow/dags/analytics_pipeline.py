@@ -43,6 +43,10 @@ with DAG(
     schedule="@daily",
     start_date=datetime(2026, 1, 1),
     catchup=False,
+    # Serialize runs: every task rebuilds the same marts schema, so two concurrent
+    # runs collide on Postgres catalog DDL ("tuple concurrently updated"). A manual
+    # trigger racing the scheduler's latest interval run is the common trigger.
+    max_active_runs=1,
     default_args=default_args,
     tags=["rag-bench", "analytics"],
 ) as dag:
