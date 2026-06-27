@@ -43,13 +43,13 @@ dbt:  ## dbt build = run + test (same models everywhere; target via DBT_TARGET)
 	cd $(DBTDIR) && $(abspath $(DBT)) build --target $${DBT_TARGET:-local}
 
 dashboard_v1:  ## v1 dashboard (port 8501)
-	$(VENV)/bin/streamlit run dashboard/app-soon-to-deprecate.py --server.port 8501
+	$(VENV)/bin/streamlit run dashboard/app-drafts-experiments.py --server.port 8501
 
 dashboard_v2:  ## v2 dashboard (port 8502)
 	$(VENV)/bin/streamlit run dashboard/app_v2.py --server.port 8502
 
 dashboard:  ## Launch both dashboards in background (v1=8501, v2=8502)
-	$(VENV)/bin/streamlit run dashboard/app-soon-to-deprecate.py --server.port 8501 &
+	$(VENV)/bin/streamlit run dashboard/app-drafts-experiments.py --server.port 8501 &
 	$(VENV)/bin/streamlit run dashboard/app_v2.py --server.port 8502 &
 
 pipeline: up seed ingest dbt  ## Full chain end-to-end (offline reproducibility check)

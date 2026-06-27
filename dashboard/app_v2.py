@@ -19,11 +19,6 @@ HAIKU_FAMILY = "claude-haiku-4-5"
 # conditions; filtered out of comparisons as legacy noise.
 LEGACY_RETRIEVERS = ("graph_neighborhood",)
 
-# Y-measure for the single-axis per-question-type series charts (line + grouped bar, 2.1/2.2).
-# Accuracy is pinned to an absolute 0–100%; fmt is a Vega format. The dual-axis charts further
-# down carry accuracy *and* tokens together and don't go through this.
-ACCURACY_METRIC = {"field": "accuracy", "title": "Accuracy", "fmt": "%", "domain": [0, 1]}
-
 
 def _marts_conn() -> psycopg.Connection:
     return psycopg.connect(
@@ -62,7 +57,7 @@ def load_analysis() -> pd.DataFrame:
         ["question_sk", "type_id", "type_display_label", "question_hop_count"]
     ]
     dim_ret = load_mart("dim_retriever_cond")[
-        ["retriever_cond_sk", "display_label", "retriever", "mechanism"]
+        ["retriever_cond_sk", "display_label", "retriever", "mechanism", "sort_order"]
     ]
     dim_gen = load_mart("dim_generator")[["generator_sk", "generator_model_family"]]
     dim_writer = load_mart("dim_writer")[
@@ -95,6 +90,8 @@ def accuracy_cells(df: pd.DataFrame, row: str, col: str) -> pd.DataFrame:
     keys = [row, col]
     if col == "type_id" and "type_display_label" in df.columns:
         keys.append("type_display_label")
+    if row == "display_label" and "sort_order" in df.columns:
+        keys.append("sort_order")
     cells = df.groupby(keys, as_index=False).agg(
         total=("passed", "size"),
         passed=("passed", "sum"),
@@ -122,11 +119,25 @@ def _qtype_axis(cells: pd.DataFrame, col: str = "type_id") -> tuple[str, object]
     return col, "ascending"
 
 
+def _retriever_axis(cells: pd.DataFrame, field: str = "display_label") -> tuple[str, object]:
+    """(field, sort) for the retriever axis: canonical order from sort_order (seed-driven)."""
+    if "sort_order" in cells.columns and field in cells.columns:
+        order = (
+            cells[[field, "sort_order"]]
+            .drop_duplicates(field)
+            .sort_values("sort_order")[field]
+            .tolist()
+        )
+        return field, order
+    return field, "ascending"
+
+
 def accuracy_heatmap(
     cells: pd.DataFrame, row: str, col: str, row_title: str, col_title: str
 ) -> alt.LayerChart:
     """Red→yellow→green heatmap on an absolute [0,1] scale (0 red, 0.5 yellow, 1 green)."""
     col_field, col_sort = _qtype_axis(cells, col)
+    _, row_sort = _retriever_axis(cells, row) if row == "display_label" else (row, "ascending")
     enc_x = alt.X(
         f"{col_field}:N",
         title=col_title,
@@ -136,7 +147,7 @@ def accuracy_heatmap(
     enc_y = alt.Y(
         f"{row}:N",
         title=row_title,
-        sort="ascending",
+        sort=row_sort,
         # Wrap each label at its " (" parenthetical onto a 2nd line (no-op if no paren).
         axis=alt.Axis(
             labelExpr="split(replace(datum.label, ' (', '\\n('), '\\n')", labelLimit=200
@@ -171,105 +182,6 @@ def accuracy_heatmap(
         ),
     )
     return (heat + labels).properties(height=alt.Step(38))
-
-
-def _series_encodings(cells: pd.DataFrame, series_col: str, series_title: str, metric: dict) -> dict:
-    """Shared x/y/color/tooltip for the per-question-type series charts (line + grouped bar).
-
-    `metric` swaps the y-measure (accuracy vs tokens). color sort is pinned so the same
-    `series_col` value keeps its colour across charts; the tooltip carries both measures.
-    """
-    y_kwargs = {"title": metric["title"], "axis": alt.Axis(format=metric["fmt"])}
-    if metric["domain"] is not None:
-        y_kwargs["scale"] = alt.Scale(domain=metric["domain"])
-    xf, xs = _qtype_axis(cells)
-    return dict(
-        x=alt.X(f"{xf}:N", title="Question type", sort=xs,
-                axis=alt.Axis(labelAngle=-45)),
-        y=alt.Y(f"{metric['field']}:Q", **y_kwargs),
-        color=alt.Color(f"{series_col}:N", title=series_title, sort="ascending"),
-        tooltip=[
-            alt.Tooltip(f"{xf}:N", title="Question type"),
-            alt.Tooltip(f"{series_col}:N", title=series_title),
-            alt.Tooltip("accuracy:Q", title="Accuracy", format=".0%"),
-            alt.Tooltip("avg_tokens:Q", title="Avg tokens/answer", format=",.0f"),
-            alt.Tooltip("total:Q", title="Answers"),
-        ],
-    )
-
-
-def series_line_chart(
-    cells: pd.DataFrame, series_col: str, series_title: str, metric: dict = ACCURACY_METRIC
-) -> alt.Chart:
-    """One line per `series_col` value vs question type, y = the chosen metric."""
-    return alt.Chart(cells).mark_line(point=True).encode(
-        **_series_encodings(cells, series_col, series_title, metric)
-    )
-
-
-def series_grouped_bar_chart(
-    cells: pd.DataFrame, series_col: str, series_title: str, metric: dict = ACCURACY_METRIC
-) -> alt.Chart:
-    """Grouped bars per question type, one bar per `series_col` value, y = the chosen metric."""
-    return alt.Chart(cells).mark_bar().encode(
-        xOffset=alt.XOffset(f"{series_col}:N"),
-        **_series_encodings(cells, series_col, series_title, metric),
-    )
-
-
-def series_dual_axis_chart(
-    cells: pd.DataFrame, series_col: str, series_title: str
-) -> alt.LayerChart:
-    """Accuracy (left axis, %) + avg tokens (right axis) on one chart, per question type.
-
-    A deliberate dual axis: the two measures keep *independent* y-scales (resolve_scale
-    y='independent') so each fills the plot height — the "normalized" view that compares shape
-    without forcing two unrelated units onto one number line. colour = series; line style =
-    measure (solid accuracy / dashed tokens). Both axes are zero-anchored so the visual gap
-    between the lines isn't an artefact of a floating baseline. Caveat carried over from the
-    old metric-toggle: a dual axis can *imply* a correlation that isn't there — read each line
-    against its own axis, never against the other.
-    """
-    xf, xs = _qtype_axis(cells)
-    x = alt.X(f"{xf}:N", title="Question type", sort=xs,
-              axis=alt.Axis(labelAngle=-45))
-    color = alt.Color(f"{series_col}:N", title=series_title, sort="ascending")
-    # Solid vs dashed distinguishes the two measures; explicit domain pins the mapping so the
-    # accuracy layer is always solid regardless of layer/encoding order.
-    dash = alt.StrokeDash(
-        "metric:N", title="Measure",
-        scale=alt.Scale(domain=["Accuracy", "Avg tokens"], range=[[1, 0], [5, 4]]),
-    )
-    tooltip = [
-        alt.Tooltip(f"{xf}:N", title="Question type"),
-        alt.Tooltip(f"{series_col}:N", title=series_title),
-        alt.Tooltip("accuracy:Q", title="Accuracy", format=".0%"),
-        alt.Tooltip("avg_tokens:Q", title="Avg tokens/answer", format=",.0f"),
-        alt.Tooltip("total:Q", title="Answers"),
-    ]
-    accuracy = (
-        alt.Chart(cells.assign(metric="Accuracy"))
-        .mark_line(point=True)
-        .encode(
-            x=x,
-            y=alt.Y("accuracy:Q", title="Accuracy",
-                    scale=alt.Scale(domain=[0, 1]),
-                    axis=alt.Axis(format="%", orient="left")),
-            color=color, strokeDash=dash, tooltip=tooltip,
-        )
-    )
-    tokens = (
-        alt.Chart(cells.assign(metric="Avg tokens"))
-        .mark_line(point=True)
-        .encode(
-            x=x,
-            y=alt.Y("avg_tokens:Q", title="Avg total tokens / answer",
-                    scale=alt.Scale(zero=True),
-                    axis=alt.Axis(format="~s", orient="right")),
-            color=color, strokeDash=dash, tooltip=tooltip,
-        )
-    )
-    return alt.layer(accuracy, tokens).resolve_scale(y="independent")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -354,10 +266,12 @@ def render_accuracy_matrix1(df: pd.DataFrame) -> None:
 
 
 def render_accuracy_matrix2(df: pd.DataFrame) -> None:
-    """SPARQL-gen accuracy by writer model family — three views (2.0 heatmap, 2.1 line, 2.2 bar).
+    """SPARQL-gen accuracy by writer model family — heatmap of writer × question type.
 
     Isolates the one retriever with a second LLM in the loop (the SPARQL writer) and compares
-    writer families head-to-head, holding the generator fixed. Same slice, three encodings.
+    writer families head-to-head, holding the generator fixed. The line/grouped-bar encodings of
+    this same slice are draft (single-series until more writer families land) and live in
+    app-drafts-experiments.py.
     """
     sparql = df[
         (df["generator_model_family"] == HAIKU_FAMILY)
@@ -373,91 +287,9 @@ def render_accuracy_matrix2(df: pd.DataFrame) -> None:
     )
 
     cells = accuracy_cells(sparql, row="writer_model_family", col="type_id")
-
-    st.markdown("**2.0 — heatmap** · writer × question type")
     st.altair_chart(
         accuracy_heatmap(cells, "writer_model_family", "type_id",
                          "Writer model family", "Question type"),
-        use_container_width=True,
-    )
-
-    st.markdown("**2.1 — line** · accuracy by question type, one line per writer")
-    st.altair_chart(
-        series_line_chart(cells, "writer_model_family", "Writer family"),
-        use_container_width=True,
-    )
-
-    st.markdown("**2.2 — grouped bars** · accuracy per question type, one bar per writer")
-    st.altair_chart(
-        series_grouped_bar_chart(cells, "writer_model_family", "Writer family"),
-        use_container_width=True,
-    )
-
-
-def render_harness_evolution(df: pd.DataFrame) -> None:
-    """Per-question-type accuracy + avg tokens across harness versions; generator+writer=haiku.
-
-    Accuracy (left axis, %) and avg tokens/answer (right axis) share one chart on independent,
-    zero-anchored scales (the "normalized" dual axis) so a version's quality and its cost read
-    together per question type. Series = harness version. Replaces the earlier accuracy/tokens
-    metric toggle — read each line against its own axis; their proximity isn't a correlation.
-    """
-    keep = df[
-        (df["generator_model_family"] == HAIKU_FAMILY)
-        & (~df["retriever"].isin(LEGACY_RETRIEVERS))
-        & (
-            df["writer_model"].isna()
-            | df["writer_model"].str.startswith(HAIKU_FAMILY, na=False)
-        )
-    ]
-    versions = sorted(keep["harness_version"].dropna().unique())
-
-    st.subheader("Harness-version evolution")
-    st.caption(
-        f"Generator + writer fixed to **{HAIKU_FAMILY}**, retrieval conditions pooled · "
-        f"series = harness version (present: {', '.join(versions) or '—'}).  \n"
-        "Accuracy (left axis, %, solid) and avg total tokens/answer (right axis, dashed) on "
-        "independent zero-anchored scales — read each line against its own axis."
-    )
-    if len(versions) < 2:
-        st.info(
-            f"Only **{versions[0] if versions else '—'}** is present — no evolution to plot yet. "
-            "This chart turns into a comparison automatically once harness-v2/v3 runs are ingested."
-        )
-
-    cells = accuracy_cells(keep, row="harness_version", col="type_id")
-    st.altair_chart(
-        series_dual_axis_chart(cells, "harness_version", "Harness version"),
-        use_container_width=True,
-    )
-
-
-def render_token_usage(df: pd.DataFrame) -> None:
-    """Avg tokens (right axis) + accuracy (left axis) per question type × retriever; gen=haiku.
-
-    Cost and quality on one dual-axis chart, independent zero-anchored scales (the "normalized"
-    view). Tokens are averaged per answer, never summed: a type with 8 questions shouldn't look
-    costlier than a 4-question type just for having more of them — per-question cost is what's
-    comparable. total tokens = input + output across the generator and (for SPARQL-gen) the
-    writer. Retriever is the series because it dominates token cost (closed-book is cheap, graph
-    is not); each condition gets a solid accuracy line and a dashed token line — read each
-    against its own axis, the two aren't a correlation.
-    """
-    keep = df[
-        (df["generator_model_family"] == HAIKU_FAMILY)
-        & (~df["retriever"].isin(LEGACY_RETRIEVERS))
-    ]
-    st.subheader("Token usage & accuracy — per answered question")
-    st.caption(
-        f"Generator fixed to **{HAIKU_FAMILY}**, writers pooled, legacy retriever excluded.  \n"
-        "Accuracy (left axis, %, solid) and total tokens = input + output across generator + "
-        "SPARQL writer (right axis, dashed), **averaged per answered question** so differing "
-        "question counts per type don't distort the comparison.  \n"
-        "_Dual axis: read each line against its own axis — proximity isn't correlation._"
-    )
-    cells = accuracy_cells(keep, row="display_label", col="type_id")
-    st.altair_chart(
-        series_dual_axis_chart(cells, "display_label", "Retriever condition"),
         use_container_width=True,
     )
 
@@ -483,19 +315,20 @@ def render_latency_split(df: pd.DataFrame) -> None:
         "_Draft for review — phases averaged over answers that emitted latency (errors skipped)._"
     )
 
-    by_cond = keep.groupby("display_label", as_index=False).agg(
+    by_cond = keep.groupby(["display_label", "sort_order"], as_index=False).agg(
         Retrieval=("retrieval_latency_ms", "mean"),
         Generation=("generation_latency_ms", "mean"),
         n=("scored_answer_sk", "size"),
     )
     long = by_cond.melt(
-        id_vars=["display_label", "n"],
+        id_vars=["display_label", "sort_order", "n"],
         value_vars=["Retrieval", "Generation"],
         var_name="phase",
         value_name="avg_latency_ms",
     )
     # Pin stack/legend order so Retrieval is always the first (left) segment.
     long["phase_order"] = long["phase"].map({"Retrieval": 0, "Generation": 1})
+    _, ret_order = _retriever_axis(by_cond)
 
     chart = (
         alt.Chart(long)
@@ -505,7 +338,7 @@ def render_latency_split(df: pd.DataFrame) -> None:
             y=alt.Y(
                 "display_label:N",
                 title="Retriever condition",
-                sort=alt.EncodingSortField("avg_latency_ms", op="sum", order="descending"),
+                sort=ret_order,
             ),
             color=alt.Color(
                 "phase:N",
@@ -581,10 +414,6 @@ def main() -> None:
     render_accuracy_matrix1(df)
     st.divider()
     render_accuracy_matrix2(df)
-    st.divider()
-    render_harness_evolution(df)
-    st.divider()
-    render_token_usage(df)
     st.divider()
     render_latency_split(df)
     st.divider()
