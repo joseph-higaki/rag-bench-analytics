@@ -150,7 +150,12 @@ def _retriever_axis(cells: pd.DataFrame, field: str = "display_label") -> tuple[
     return field, "ascending"
 
 
-def _series_encodings(cells: pd.DataFrame, series_col: str, series_title: str, metric: dict) -> dict:
+def _series_encodings(
+        cells: pd.DataFrame, 
+        series_col: str, 
+        series_title: str, 
+        metric: dict
+    ) -> dict:
     """Shared x/y/color/tooltip for the per-question-type series charts (line + grouped bar).
 
     `metric` swaps the y-measure (accuracy vs tokens). color sort is pinned so the same
