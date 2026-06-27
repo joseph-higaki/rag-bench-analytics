@@ -6,6 +6,80 @@ implemented; the implementation checklist is the spec for the later execution ba
 
 ---
 
+## ADR-008 — Pricing coverage: local models cost $0 by *rule*; unknown models stay NULL but surface in a coverage catalog
+
+- **Status:** Accepted (pending) — **future build, not implemented.** The implementation checklist
+  is the spec for the later batch. Today's stopgap (this batch): the local-model `$0` is still the
+  hand-enumerated `seed_pricing_local_overrides` (now `qwen2.5:3b-instruct` + `qwen2.5:3b-coder`).
+- **Date:** 2026-06-27
+
+### Context
+
+Cost joins `int_model_pricing` on `model_resolved` (left join, `int_scored_answers_enriched`). An
+unmatched model yields **NULL** cost, NULL `*_pricing_sk`, and no `dim_token_pricing` row — and NULL
+**silently vanishes** from aggregations (`SUM` skips it; `AVG` drops it from numerator *and*
+denominator; cost-coverage and per-slice views understate). Trigger: adding `qwen2.5:3b-coder`
+alongside `qwen2.5:3b-instruct` — the coder variant matched nothing (not in Portkey, not in the
+override) and went NULL, though it is a local model that genuinely costs $0.
+
+Two classes of "unmatched" are conflated today:
+
+- **Known-free local (Ollama):** genuinely $0. Priced only via hand-enumerated override rows, so
+  every new local tag silently → NULL until someone adds a row. Fragile, doesn't scale.
+- **Unknown hosted (e.g. an OpenAI model not yet in the catalog):** true cost *unknown*. NULL is
+  honest but silent.
+
+### Decision
+
+1. **Local models cost $0 by a *rule*, not enumeration.** Identify local by `provider = 'ollama'`
+   (or an `is_local` predicate) and price it $0 by construction — a new `qwen`/`llama` tag is free
+   with no hand-added row. Replaces the per-tag override rows for *local* models. **Constraint:**
+   preserve the null-FK-⇔-null-cost invariant (ADR-003) — local-zero needs a `dim_token_pricing`
+   member to FK to (a single synthetic "local Ollama" pricing row, or generated per-observed-local
+   rows), **not** a bare coalesce-to-0 that leaves `pricing_sk` NULL while cost is 0.
+2. **Unknown (non-local) unmatched models stay NULL.** Never fabricate a price — honest-null
+   preserved (golden rule; ADR-006 #4). **Rejected the blanket "unmatched → 0"** alternative: it
+   fabricates $0 for a genuinely-expensive hosted model, understating the headline cost metric —
+   *worse* than NULL (a confident wrong number vs an honest abstention).
+3. **New coverage catalog** surfaces every observed model absent from pricing — this is what removes
+   the "silent NULL" problem (the real complaint behind wanting 0). One row per observed
+   `(provider, model_resolved)` with no pricing match, plus usage measures (answers, total tokens,
+   first/last seen). Ollama entries → signal "extend the local rule"; hosted entries → signal "add a
+   real price." It is the coverage **worklist** + a dashboard panel.
+   - **Shape:** a coverage/audit relation, **not** a conformed star dimension (nothing in the star
+     FKs to it). Lean fct-like with usage measures (e.g. `fct_pricing_coverage_gap`) or a simple
+     `audit_unpriced_models` — decide at build time.
+
+### Consequences
+
+- (+) Local models free by construction; no per-tag maintenance.
+- (+) Coverage gaps visible + actionable; honest-NULL stops meaning *silent*.
+- (+) Honest-null invariant preserved for genuinely-unknown prices.
+- (−) The local rule needs a dim member to keep the null-FK invariant (synthetic/generated row), not
+  just a coalesce — more than a one-liner.
+- (−) New marts/monitoring relation + a dashboard panel — net surface, justified by coverage
+  visibility.
+- Until built: local `$0` rides the enumerated override (instruct + coder); a new local tag is NULL
+  until added. Unknown hosted already behaves as decided (NULL).
+
+### Implementation checklist (the future-build spec)
+
+- [ ] **Local-zero by rule:** price `provider='ollama'`/`is_local` models at $0 without per-tag rows;
+      keep a `dim_token_pricing` member so `generator_pricing_sk`/`writer_pricing_sk` stay non-null
+      for local (null-FK-⇔-null-cost holds). Retire the local rows in `seed_pricing_local_overrides`
+      once the rule covers them (keep the seed only for genuine curated exceptions).
+- [ ] **Coverage catalog:** new marts relation = observed generator/writer models (from the fact /
+      `int_`) LEFT JOIN `int_model_pricing`, keep the misses; add usage measures.
+- [ ] **Tests:** the catalog must be empty of *local* models once the rule lands (a local model in
+      it = the rule missed it); hosted entries are expected (the worklist).
+- [ ] **Dashboard:** a "pricing coverage" panel reading the catalog (rule #2: marts only).
+- [ ] **Docs:** update the cost-pricing memory + README cost note when built.
+
+**Anti-goal (rejected):** blanket "unmatched → 0" — fabricates cost for unknown hosted models. The
+catalog, not a fake 0, is the answer to silent NULLs.
+
+---
+
 ## ADR-007 — Landing layout: dated run batches + recursive discovery; `reference/` for shared inputs
 
 - **Status:** Accepted — implemented 2026-06-26.
