@@ -25,6 +25,14 @@ exports/
 minio-data/
 postgres-data/
 
+# Ingestion run batches are local pipeline outputs: keep ONE committed as the sample
+# fixture, ignore the rest (incl. future dated batches). reference/ (shared inputs read
+# at transform time) stays tracked; older already-committed batches remain but take no
+# new files. Negation works because the parent ingestion_sample/ is not itself ignored.
+ingestion_sample/*/
+!ingestion_sample/reference/
+!ingestion_sample/20260627T091002Z/
+
 # Terraform
 infra/.terraform/
 infra/*.tfstate
