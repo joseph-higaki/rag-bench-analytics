@@ -61,7 +61,13 @@ flowchart LR
 
 ## Dashboard Screenshot
 
-![alt text](rag-bench-analytics-dashboard-screenshot-draft.png)  
+![alt text](rag-bench-analytics-dashboard-screenshot-draftv2-01.png)  
+ 
+ ![alt text](rag-bench-analytics-dashboard-screenshot-draftv2-03.png)
+ 
+ ![alt text](rag-bench-analytics-dashboard-screenshot-draftv2-02.png)
+
+
 
 ## The source contract (what actually arrives)
 
