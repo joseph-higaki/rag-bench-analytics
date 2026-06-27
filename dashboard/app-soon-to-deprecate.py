@@ -9,6 +9,7 @@ RETRIEVER. Every view slices outcomes/cost/latency by retriever condition.
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 
 import pandas as pd
 import psycopg
@@ -30,13 +31,24 @@ def _marts_conn() -> psycopg.Connection:
 
 @st.cache_data(ttl=300)
 def load_mart(table: str) -> pd.DataFrame:
-    """Read one marts table into a DataFrame (read-only role, marts schema only)."""
+    """Read one marts table into a DataFrame (read-only role, marts schema only).
+
+    Built from the cursor, not pd.read_sql (which warns on a raw psycopg connection — it wants a
+    SQLAlchemy engine we don't add). Decimal→float to match read_sql's float64 dtype.
+    """
     with _marts_conn() as conn:
-        return pd.read_sql(f'select * from "{MARTS_SCHEMA}"."{table}"', conn)
+        cur = conn.execute(f'select * from "{MARTS_SCHEMA}"."{table}"')
+        df = pd.DataFrame(cur.fetchall(), columns=[d.name for d in cur.description])
+    for col in df.columns:
+        if df[col].dtype == object and df[col].map(lambda v: isinstance(v, Decimal)).any():
+            df[col] = df[col].astype(float)
+    return df
 
 
 def main() -> None:
-    st.set_page_config(page_title="Biomedical RAG Bench — Analytics - soon to deprecate", layout="wide")
+    st.set_page_config(
+        page_title="Biomedical RAG Bench — Analytics - soon to deprecate", layout="wide"
+    )
     st.title("Biomedical RAG Bench — Retriever Analytics")
     st.caption(
         "Generator fixed per run · ground truth = graph traversal · "
@@ -83,7 +95,7 @@ def main() -> None:
     st.dataframe(by_ret.style.format({
         "pass_rate": "{:.1%}", "avg_cost_usd": "${:.5f}",
         "avg_latency_ms": "{:.0f}", "avg_total_tokens": "{:.0f}",
-    }), use_container_width=True)
+    }), width="stretch")
 
     col_a, col_b = st.columns(2)
     col_a.caption("Pass rate by retriever")
@@ -104,7 +116,7 @@ def main() -> None:
             aggfunc="mean",
         )
     )
-    st.dataframe(pivot.style.format("{:.0%}", na_rep="—"), use_container_width=True)
+    st.dataframe(pivot.style.format("{:.0%}", na_rep="—"), width="stretch")
 
     st.divider()
 
@@ -118,13 +130,16 @@ def main() -> None:
     )
     st.dataframe(
         dim_pricing.sort_values(["provider", "model_resolved"])[
-            ["provider", "model_resolved", "input_usd_per_mtok", "output_usd_per_mtok", "pricing_source"]
+            [
+                "provider", "model_resolved", "input_usd_per_mtok",
+                "output_usd_per_mtok", "pricing_source",
+            ]
         ].rename(columns={
             "provider": "Provider", "model_resolved": "Model",
             "input_usd_per_mtok": "Input $/Mtok", "output_usd_per_mtok": "Output $/Mtok",
             "pricing_source": "Source",
         }),
-        use_container_width=True, hide_index=True,
+        width="stretch", hide_index=True,
     )
 
 

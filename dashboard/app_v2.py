@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 
 import altair as alt
 import pandas as pd
@@ -36,8 +37,16 @@ def _marts_conn() -> psycopg.Connection:
 
 @st.cache_data(ttl=300)
 def load_mart(table: str) -> pd.DataFrame:
+    # Build from the cursor, not pd.read_sql (which warns on a raw psycopg conn — it wants a
+    # SQLAlchemy engine we deliberately don't add). Postgres numeric -> Decimal; coerce to float
+    # to match read_sql's float64 dtype so downstream means/charts behave identically.
     with _marts_conn() as conn:
-        return pd.read_sql(f'select * from "{MARTS_SCHEMA}"."{table}"', conn)
+        cur = conn.execute(f'select * from "{MARTS_SCHEMA}"."{table}"')
+        df = pd.DataFrame(cur.fetchall(), columns=[d.name for d in cur.description])
+    for col in df.columns:
+        if df[col].dtype == object and df[col].map(lambda v: isinstance(v, Decimal)).any():
+            df[col] = df[col].astype(float)
+    return df
 
 
 @st.cache_data(ttl=300)
@@ -285,7 +294,7 @@ def render_ground_truth(dim_q: pd.DataFrame) -> None:
             "ground_truth_answer_text": "Ground truth example",
         }
     )
-    st.dataframe(display, use_container_width=True, hide_index=True)
+    st.dataframe(display, width="stretch", hide_index=True)
 
 
 def render_accuracy_matrix1(df: pd.DataFrame) -> None:
@@ -392,7 +401,7 @@ def render_harness_evolution(df: pd.DataFrame) -> None:
 
 
 def render_token_usage(df: pd.DataFrame) -> None:
-    """Avg total tokens (right axis) + accuracy (left axis) per question type × retriever; gen=haiku.
+    """Avg tokens (right axis) + accuracy (left axis) per question type × retriever; gen=haiku.
 
     Cost and quality on one dual-axis chart, independent zero-anchored scales (the "normalized"
     view). Tokens are averaged per answer, never summed: a type with 8 questions shouldn't look
@@ -523,7 +532,7 @@ def render_pricing_reference(dim_pricing: pd.DataFrame) -> None:
             "Input $/Mtok": "${:.2f}", "Output $/Mtok": "${:.2f}",
             "Cache-read $/Mtok": "${:.2f}", "Cache-write $/Mtok": "${:.2f}",
         }),
-        use_container_width=True, hide_index=True,
+        width="stretch", hide_index=True,
     )
 
 
