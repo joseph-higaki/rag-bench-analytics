@@ -58,7 +58,9 @@ def load_analysis() -> pd.DataFrame:
     = passed/total over the cell (the spec's count(is_passed=true)/total).
     """
     fct = load_mart("fct_scored_answer")
-    dim_q = load_mart("dim_question")[["question_sk", "type_id", "question_hop_count"]]
+    dim_q = load_mart("dim_question")[
+        ["question_sk", "type_id", "type_display_label", "question_hop_count"]
+    ]
     dim_ret = load_mart("dim_retriever_cond")[
         ["retriever_cond_sk", "display_label", "retriever", "mechanism"]
     ]
@@ -74,6 +76,8 @@ def load_analysis() -> pd.DataFrame:
         .merge(dim_writer, on="writer_sk", how="left")
         .merge(dim_run, on="run_sk", how="left")
     )
+    # Never leave the question-type axis blank if a type_id is unseeded — fall back to the id.
+    df["type_display_label"] = df["type_display_label"].fillna(df["type_id"])
     df["passed"] = (df["is_passed"] == True).fillna(False).astype(int)  # noqa: E712
     # total tokens for the answer pipeline: generator + (SPARQL) writer, nulls as 0.
     df["total_tokens"] = (
@@ -83,8 +87,15 @@ def load_analysis() -> pd.DataFrame:
 
 
 def accuracy_cells(df: pd.DataFrame, row: str, col: str) -> pd.DataFrame:
-    """Long-form per (row, col) cell: accuracy (passed/total), avg tokens, and the counts."""
-    cells = df.groupby([row, col], as_index=False).agg(
+    """Long-form per (row, col) cell: accuracy (passed/total), avg tokens, and the counts.
+
+    When the column axis is the question type, its display label rides along (1:1 with type_id,
+    so the grain is unchanged) — charts show "Factoid (1-hop)" yet still sort by numbered type_id.
+    """
+    keys = [row, col]
+    if col == "type_id" and "type_display_label" in df.columns:
+        keys.append("type_display_label")
+    cells = df.groupby(keys, as_index=False).agg(
         total=("passed", "size"),
         passed=("passed", "sum"),
         avg_tokens=("total_tokens", "mean"),
@@ -93,14 +104,33 @@ def accuracy_cells(df: pd.DataFrame, row: str, col: str) -> pd.DataFrame:
     return cells
 
 
+def _qtype_axis(cells: pd.DataFrame, col: str = "type_id") -> tuple[str, object]:
+    """(field, sort) for the question-type axis: show the display label, order by numbered type_id.
+
+    Keeps the 01→10 question-type order (an explicit category list, since the labels themselves
+    sort alphabetically). Falls back to the raw `col`/ascending when labels aren't present, so
+    non-type axes and unlabelled data still render.
+    """
+    if "type_display_label" in cells.columns:
+        order = (
+            cells[["type_id", "type_display_label"]]
+            .drop_duplicates()
+            .sort_values("type_id")["type_display_label"]
+            .tolist()
+        )
+        return "type_display_label", order
+    return col, "ascending"
+
+
 def accuracy_heatmap(
     cells: pd.DataFrame, row: str, col: str, row_title: str, col_title: str
 ) -> alt.LayerChart:
     """Red→yellow→green heatmap on an absolute [0,1] scale (0 red, 0.5 yellow, 1 green)."""
+    col_field, col_sort = _qtype_axis(cells, col)
     enc_x = alt.X(
-        f"{col}:N",
+        f"{col_field}:N",
         title=col_title,
-        sort="ascending",
+        sort=col_sort,
         axis=alt.Axis(labelAngle=-45),  # diagonal so long type labels read fully
     )
     enc_y = alt.Y(
@@ -123,7 +153,7 @@ def accuracy_heatmap(
         ),
         tooltip=[
             alt.Tooltip(f"{row}:N", title=row_title),
-            alt.Tooltip(f"{col}:N", title=col_title),
+            alt.Tooltip(f"{col_field}:N", title=col_title),
             alt.Tooltip("accuracy:Q", title="Accuracy", format=".0%"),
             alt.Tooltip("passed:Q", title="Passed"),
             alt.Tooltip("total:Q", title="Total"),
@@ -143,7 +173,7 @@ def accuracy_heatmap(
     return (heat + labels).properties(height=alt.Step(38))
 
 
-def _series_encodings(series_col: str, series_title: str, metric: dict) -> dict:
+def _series_encodings(cells: pd.DataFrame, series_col: str, series_title: str, metric: dict) -> dict:
     """Shared x/y/color/tooltip for the per-question-type series charts (line + grouped bar).
 
     `metric` swaps the y-measure (accuracy vs tokens). color sort is pinned so the same
@@ -152,13 +182,14 @@ def _series_encodings(series_col: str, series_title: str, metric: dict) -> dict:
     y_kwargs = {"title": metric["title"], "axis": alt.Axis(format=metric["fmt"])}
     if metric["domain"] is not None:
         y_kwargs["scale"] = alt.Scale(domain=metric["domain"])
+    xf, xs = _qtype_axis(cells)
     return dict(
-        x=alt.X("type_id:N", title="Question type", sort="ascending",
+        x=alt.X(f"{xf}:N", title="Question type", sort=xs,
                 axis=alt.Axis(labelAngle=-45)),
         y=alt.Y(f"{metric['field']}:Q", **y_kwargs),
         color=alt.Color(f"{series_col}:N", title=series_title, sort="ascending"),
         tooltip=[
-            alt.Tooltip("type_id:N", title="Question type"),
+            alt.Tooltip(f"{xf}:N", title="Question type"),
             alt.Tooltip(f"{series_col}:N", title=series_title),
             alt.Tooltip("accuracy:Q", title="Accuracy", format=".0%"),
             alt.Tooltip("avg_tokens:Q", title="Avg tokens/answer", format=",.0f"),
@@ -172,7 +203,7 @@ def series_line_chart(
 ) -> alt.Chart:
     """One line per `series_col` value vs question type, y = the chosen metric."""
     return alt.Chart(cells).mark_line(point=True).encode(
-        **_series_encodings(series_col, series_title, metric)
+        **_series_encodings(cells, series_col, series_title, metric)
     )
 
 
@@ -182,7 +213,7 @@ def series_grouped_bar_chart(
     """Grouped bars per question type, one bar per `series_col` value, y = the chosen metric."""
     return alt.Chart(cells).mark_bar().encode(
         xOffset=alt.XOffset(f"{series_col}:N"),
-        **_series_encodings(series_col, series_title, metric),
+        **_series_encodings(cells, series_col, series_title, metric),
     )
 
 
@@ -199,7 +230,8 @@ def series_dual_axis_chart(
     old metric-toggle: a dual axis can *imply* a correlation that isn't there — read each line
     against its own axis, never against the other.
     """
-    x = alt.X("type_id:N", title="Question type", sort="ascending",
+    xf, xs = _qtype_axis(cells)
+    x = alt.X(f"{xf}:N", title="Question type", sort=xs,
               axis=alt.Axis(labelAngle=-45))
     color = alt.Color(f"{series_col}:N", title=series_title, sort="ascending")
     # Solid vs dashed distinguishes the two measures; explicit domain pins the mapping so the
@@ -209,7 +241,7 @@ def series_dual_axis_chart(
         scale=alt.Scale(domain=["Accuracy", "Avg tokens"], range=[[1, 0], [5, 4]]),
     )
     tooltip = [
-        alt.Tooltip("type_id:N", title="Question type"),
+        alt.Tooltip(f"{xf}:N", title="Question type"),
         alt.Tooltip(f"{series_col}:N", title=series_title),
         alt.Tooltip("accuracy:Q", title="Accuracy", format=".0%"),
         alt.Tooltip("avg_tokens:Q", title="Avg tokens/answer", format=",.0f"),
