@@ -67,6 +67,22 @@ models:
               arguments:
                 to: ref('dim_corpus')
                 field: corpus_sk
+      # Pricing FKs are nullable (null when the model is unpriced); relationships tests skip nulls,
+      # so a null FK == null cost is valid, and every non-null FK resolves to a dim_token_pricing row.
+      - name: generator_pricing_sk
+        data_type: text
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_token_pricing')
+                field: pricing_sk
+      - name: writer_pricing_sk
+        data_type: text
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_token_pricing')
+                field: pricing_sk
       - name: score
         data_type: numeric
       - name: is_passed
@@ -222,3 +238,26 @@ models:
         description: Embedding model — FD on the corpus (the build id hashes it), not the retriever.
       - name: corpus_measured_at
         description: When the benchmark profiled this corpus build.
+
+  - name: dim_token_pricing
+    description: >
+      Model token-pricing catalog as a conformed dimension (ADR-003). Grain (provider,
+      model_resolved); contents follow the pricing swap point int_model_pricing, so they change
+      with var('pricing_source'). Rates are USD per 1M tokens; pricing_source carries per-row
+      provenance (seed | portkey | override). The fact's generator_pricing_sk / writer_pricing_sk
+      reference pricing_sk (null for unpriced models). Reference data, not contracted.
+    columns:
+      - name: pricing_sk
+        tests: [not_null, unique]
+      - name: model_resolved
+        tests: [not_null, unique]
+      - name: rate_unit
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['usd_per_mtok']
+      - name: pricing_source
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['seed', 'portkey', 'override']

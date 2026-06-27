@@ -106,6 +106,27 @@ def main() -> None:
     )
     st.dataframe(pivot.style.format("{:.0%}", na_rep="—"), use_container_width=True)
 
+    st.divider()
+
+    # ── pricing reference (provenance for the cost column above) ──
+    dim_pricing = load_mart("dim_token_pricing")
+    srcs = ", ".join(sorted(dim_pricing["pricing_source"].dropna().unique())) or "—"
+    st.subheader("Model token pricing (reference)")
+    st.caption(
+        f"USD per 1M tokens · source: **{srcs}**. The rates behind the cost column above; "
+        "cost is computed in dbt, not in the dashboard."
+    )
+    st.dataframe(
+        dim_pricing.sort_values(["provider", "model_resolved"])[
+            ["provider", "model_resolved", "input_usd_per_mtok", "output_usd_per_mtok", "pricing_source"]
+        ].rename(columns={
+            "provider": "Provider", "model_resolved": "Model",
+            "input_usd_per_mtok": "Input $/Mtok", "output_usd_per_mtok": "Output $/Mtok",
+            "pricing_source": "Source",
+        }),
+        use_container_width=True, hide_index=True,
+    )
+
 
 if __name__ == "__main__":
     main()

@@ -487,11 +487,52 @@ def render_latency_split(df: pd.DataFrame) -> None:
     st.altair_chart(chart, use_container_width=True)
 
 
+def render_pricing_reference(dim_pricing: pd.DataFrame) -> None:
+    """Reference + provenance: the token prices behind every cost figure above.
+
+    Reads dim_token_pricing (the conformed pricing dim, fed by the int_model_pricing swap point).
+    Prices are USD per 1M tokens; each row's source (seed | portkey | override) is shown so a cost
+    is traceable to its rate. No computation here — cost is precomputed in dbt; this only displays
+    the inputs (rule #2: the dashboard reads marts, it doesn't price).
+    """
+    st.subheader("Model token pricing — reference & provenance")
+    sources = ", ".join(sorted(dim_pricing["pricing_source"].dropna().unique())) or "—"
+    st.caption(
+        f"USD per 1M tokens · source of record: **{sources}** "
+        "(swap with `dbt build --vars pricing_source=portkey`).  \n"
+        "These are the rates behind the cost figures above — cost is computed in dbt, not here."
+    )
+    display = dim_pricing.sort_values(["provider", "model_resolved"])[
+        [
+            "provider", "model_resolved",
+            "input_usd_per_mtok", "output_usd_per_mtok",
+            "cache_read_usd_per_mtok", "cache_write_usd_per_mtok",
+            "effective_date", "pricing_source",
+        ]
+    ].rename(
+        columns={
+            "provider": "Provider", "model_resolved": "Model",
+            "input_usd_per_mtok": "Input $/Mtok", "output_usd_per_mtok": "Output $/Mtok",
+            "cache_read_usd_per_mtok": "Cache-read $/Mtok",
+            "cache_write_usd_per_mtok": "Cache-write $/Mtok",
+            "effective_date": "As of", "pricing_source": "Source",
+        }
+    )
+    st.dataframe(
+        display.style.format({
+            "Input $/Mtok": "${:.2f}", "Output $/Mtok": "${:.2f}",
+            "Cache-read $/Mtok": "${:.2f}", "Cache-write $/Mtok": "${:.2f}",
+        }),
+        use_container_width=True, hide_index=True,
+    )
+
+
 def main() -> None:
     st.set_page_config(page_title="Biomedical RAG Bench — Analytics v2", layout="wide")
     st.title("Biomedical RAG Bench — Retriever Analytics v2")
 
     dim_q = load_mart("dim_question")
+    dim_pricing = load_mart("dim_token_pricing")
     df = load_analysis()
 
     render_ground_truth(dim_q)
@@ -505,6 +546,8 @@ def main() -> None:
     render_token_usage(df)
     st.divider()
     render_latency_split(df)
+    st.divider()
+    render_pricing_reference(dim_pricing)
 
 
 if __name__ == "__main__":

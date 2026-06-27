@@ -91,6 +91,11 @@ select
     t.is_sparql_valid,
     t.sparql_num_rows,
 
+    -- pricing FKs: carried from the gp/wp cost join, NULL exactly when the model is unpriced
+    -- (no dim row) so null FK == null cost (ADR-003 surrogate FK; never rehashed in the fact).
+    gp.pricing_sk                                   as generator_pricing_sk,
+    wp.pricing_sk                                   as writer_pricing_sk,
+
     -- COST (per 1M tokens -> divide by 1e6)
     (
         coalesce(a.generator_input_tokens, 0)            * gp.input_usd_per_mtok

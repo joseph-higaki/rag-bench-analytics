@@ -17,6 +17,12 @@ select
     {{ surrogate_key(['scoring']) }}                                                           as scoring_sk,
     {{ surrogate_key(['corpus_build_id']) }}                                                   as corpus_sk,
 
+    -- pricing FKs -> dim_token_pricing. CARRIED from int (the gp/wp cost join), not rebuilt with
+    -- surrogate_key(): they must be NULL when the model is unpriced (no dim row) so the relationship
+    -- holds and a null FK lines up with a null cost. Rehashing here would point at a nonexistent row.
+    cast(generator_pricing_sk as text)              as generator_pricing_sk,
+    cast(writer_pricing_sk as text)                 as writer_pricing_sk,
+
     -- outcome measures
     score,
     is_passed,
