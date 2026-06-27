@@ -188,6 +188,48 @@ def accuracy_heatmap(
 # Sections — one render_* per dashboard block, called from main(). Built section by
 # section against the spec in next-prompts.md.env.
 # ──────────────────────────────────────────────────────────────────────────────
+def render_headline(df: pd.DataFrame) -> None:
+    """Top-of-page KPI strip: scored answers, overall accuracy, total tokens, total cost.
+
+    All four are whole-dataset rollups (no filtering) so the page opens on the totals before
+    any slice. The token card is custom HTML (not st.metric) because the spec wants the input
+    and output subtotals shown small *above* the larger total — two values over one, which a
+    single metric can't render. Tokens reconcile by construction (total = input + output);
+    cost sums the pre-coalesced fact measure (unpriced models contribute 0, never fabricated).
+    """
+    scored = len(df)
+    pass_rate = df["passed"].mean() if scored else 0.0
+    total_in = int(
+        df["generator_input_tokens"].fillna(0).sum()
+        + df["writer_input_tokens"].fillna(0).sum()
+    )
+    total_out = int(
+        df["generator_output_tokens"].fillna(0).sum()
+        + df["writer_output_tokens"].fillna(0).sum()
+    )
+    total_tokens = total_in + total_out
+    total_cost = df["total_cost_usd"].fillna(0).sum()
+
+    def _mtok(v: int) -> str:  # tokens in millions, e.g. 4_620_000 -> "4.62M"
+        return f"{v / 1e6:,.2f}M"
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Scored answers", f"{scored:,}")
+    c2.metric("Pass rate (overall accuracy)", f"{pass_rate:.1%}")
+    c3.markdown(
+        f"""
+        <div style="line-height:1.35">
+          <div style="font-size:0.8rem; opacity:0.6">
+            Input {_mtok(total_in)} &nbsp;·&nbsp; Output {_mtok(total_out)}
+          </div>
+          <div style="font-size:2.25rem; font-weight:600">{_mtok(total_tokens)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    c4.metric("Total cost (USD)", f"${total_cost:,.2f}")
+
+
 def render_ground_truth(dim_q: pd.DataFrame) -> None:
     """Explainer table: one representative question + its graph-derived answer, per type.
 
@@ -409,6 +451,8 @@ def main() -> None:
     dim_pricing = load_mart("dim_token_pricing")
     df = load_analysis()
 
+    render_headline(df)
+    st.divider()
     render_ground_truth(dim_q)
     st.divider()
     render_accuracy_matrix1(df)
