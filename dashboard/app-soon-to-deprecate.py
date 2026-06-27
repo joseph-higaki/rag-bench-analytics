@@ -36,7 +36,7 @@ def load_mart(table: str) -> pd.DataFrame:
 
 
 def main() -> None:
-    st.set_page_config(page_title="Biomedical RAG Bench — Analytics", layout="wide")
+    st.set_page_config(page_title="Biomedical RAG Bench — Analytics - soon to deprecate", layout="wide")
     st.title("Biomedical RAG Bench — Retriever Analytics")
     st.caption(
         "Generator fixed per run · ground truth = graph traversal · "
