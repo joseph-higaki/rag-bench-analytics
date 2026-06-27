@@ -1,0 +1,38 @@
+name: Create Release
+
+# Tag push (vX.Y.Z) -> verify the matching release-notes file exists at the tagged
+# commit (the safety gate), then create the GitHub Release from it. Walked through by
+# .claude/skills/release/SKILL.md.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release notes exist
+        run: |
+          NOTES_FILE=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [[ ! -f "$NOTES_FILE" ]]; then
+            echo "::error::Missing release notes file: $NOTES_FILE"
+            echo "Create it before tagging. See .claude/skills/release/SKILL.md"
+            exit 1
+          fi
+          echo "Found release notes: $NOTES_FILE"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file ".github/release-notes/${GITHUB_REF_NAME}.md"
