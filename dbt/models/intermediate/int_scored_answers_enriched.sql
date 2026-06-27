@@ -1,6 +1,6 @@
 -- Compose the per-answer grain with question attributes, run attributes, the exploded
--- traversal measures, and COST. Cost joins the external pricing seed on model_resolved
--- (prices are per 1M tokens). Two cost components:
+-- traversal measures, and COST. Cost joins the conformed pricing relation int_model_pricing
+-- (the swap point) on model_resolved (USD per 1M tokens). Two cost components:
 --   generator_cost_usd : the answering LLM (input + output + cache read + cache write)
 --   writer_cost_usd    : the sparqlgen writer LLM (input + output), null for other mechanisms
 -- A null model_resolved (older runs) or an unpriced model yields null cost — acceptable
@@ -19,10 +19,10 @@ runs as (
     from {{ ref('stg_runs') }}
 ),
 gen_price as (
-    select * from {{ ref('seed_model_pricing') }}
+    select * from {{ ref('int_model_pricing') }}
 ),
 writer_price as (
-    select * from {{ ref('seed_model_pricing') }}
+    select * from {{ ref('int_model_pricing') }}
 )
 select
     a.run_id,

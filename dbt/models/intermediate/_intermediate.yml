@@ -4,5 +4,19 @@ models:
   - name: int_scored_answers_enriched
     description: >
       Per-answer grain (run x question) joined with question, run, traversal, and the
-      external pricing seed. Ephemeral — exists only to compose the marts. Carries both
-      natural keys (for building dim FKs) and all measures including cost.
+      conformed pricing relation (int_model_pricing). Ephemeral — exists only to compose
+      the marts. Carries both natural keys (for building dim FKs) and all measures including cost.
+
+  - name: int_model_pricing
+    description: >
+      Conformed token-pricing contract and the single pricing swap point. Today a passthrough
+      over seed_model_pricing; later a source dispatcher (seed | portkey) behind var('pricing_source').
+      Rates normalized to USD per 1M tokens — any source-specific unit conversion (e.g. Portkey's
+      cents/token) happens HERE, never downstream. Unmatched models -> NULL cost downstream, never fabricated.
+    columns:
+      - name: model_resolved
+        tests: [not_null, unique]   # current grain; gains effective_date when SCD pricing lands
+      - name: rate_unit
+        tests:
+          - accepted_values:
+              values: ['usd_per_mtok']
