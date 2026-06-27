@@ -35,6 +35,12 @@ models:
 seeds:
   rag_bench_analytics:
     +schema: seeds
+    # Seeds are tiny static lookups. Force full-refresh so a column added/removed in a CSV
+    # is reflected automatically: plain `dbt seed` only INSERTs into the existing table and
+    # never ALTERs, so a schema change otherwise fails ("column does not exist") until a
+    # one-off --full-refresh. This config triggers it on every invocation — CLI, Cosmos,
+    # local, cloud — so all paths self-heal uniformly (no orchestrated-only runbook step).
+    +full_refresh: true
     seed_model_pricing:
       +column_types:
         input_usd_per_mtok: numeric

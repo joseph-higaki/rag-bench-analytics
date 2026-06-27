@@ -21,6 +21,7 @@ select
     o.top_k,
     l.retriever_family,
     l.is_graph,
-    l.display_label
+    l.display_label,
+    l.sort_order
 from observed o
 left join {{ ref('seed_retriever_labels') }} l on o.retriever = l.retriever
