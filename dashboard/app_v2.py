@@ -18,13 +18,10 @@ HAIKU_FAMILY = "claude-haiku-4-5"
 # conditions; filtered out of comparisons as legacy noise.
 LEGACY_RETRIEVERS = ("graph_neighborhood",)
 
-# Swappable y-measure for the per-question-type series charts. domain=None lets the axis
-# autoscale (token counts); accuracy is pinned to an absolute 0–100%. fmt is a Vega format.
+# Y-measure for the single-axis per-question-type series charts (line + grouped bar, 2.1/2.2).
+# Accuracy is pinned to an absolute 0–100%; fmt is a Vega format. The dual-axis charts further
+# down carry accuracy *and* tokens together and don't go through this.
 ACCURACY_METRIC = {"field": "accuracy", "title": "Accuracy", "fmt": "%", "domain": [0, 1]}
-TOKENS_METRIC = {
-    "field": "avg_tokens", "title": "Avg total tokens / answer", "fmt": "~s", "domain": None
-}
-METRICS = {"Accuracy": ACCURACY_METRIC, "Avg total tokens / answer": TOKENS_METRIC}
 
 
 def _marts_conn() -> psycopg.Connection:
@@ -180,6 +177,60 @@ def series_grouped_bar_chart(
     )
 
 
+def series_dual_axis_chart(
+    cells: pd.DataFrame, series_col: str, series_title: str
+) -> alt.LayerChart:
+    """Accuracy (left axis, %) + avg tokens (right axis) on one chart, per question type.
+
+    A deliberate dual axis: the two measures keep *independent* y-scales (resolve_scale
+    y='independent') so each fills the plot height — the "normalized" view that compares shape
+    without forcing two unrelated units onto one number line. colour = series; line style =
+    measure (solid accuracy / dashed tokens). Both axes are zero-anchored so the visual gap
+    between the lines isn't an artefact of a floating baseline. Caveat carried over from the
+    old metric-toggle: a dual axis can *imply* a correlation that isn't there — read each line
+    against its own axis, never against the other.
+    """
+    x = alt.X("type_id:N", title="Question type", sort="ascending",
+              axis=alt.Axis(labelAngle=-45))
+    color = alt.Color(f"{series_col}:N", title=series_title, sort="ascending")
+    # Solid vs dashed distinguishes the two measures; explicit domain pins the mapping so the
+    # accuracy layer is always solid regardless of layer/encoding order.
+    dash = alt.StrokeDash(
+        "metric:N", title="Measure",
+        scale=alt.Scale(domain=["Accuracy", "Avg tokens"], range=[[1, 0], [5, 4]]),
+    )
+    tooltip = [
+        alt.Tooltip("type_id:N", title="Question type"),
+        alt.Tooltip(f"{series_col}:N", title=series_title),
+        alt.Tooltip("accuracy:Q", title="Accuracy", format=".0%"),
+        alt.Tooltip("avg_tokens:Q", title="Avg tokens/answer", format=",.0f"),
+        alt.Tooltip("total:Q", title="Answers"),
+    ]
+    accuracy = (
+        alt.Chart(cells.assign(metric="Accuracy"))
+        .mark_line(point=True)
+        .encode(
+            x=x,
+            y=alt.Y("accuracy:Q", title="Accuracy",
+                    scale=alt.Scale(domain=[0, 1]),
+                    axis=alt.Axis(format="%", orient="left")),
+            color=color, strokeDash=dash, tooltip=tooltip,
+        )
+    )
+    tokens = (
+        alt.Chart(cells.assign(metric="Avg tokens"))
+        .mark_line(point=True)
+        .encode(
+            x=x,
+            y=alt.Y("avg_tokens:Q", title="Avg total tokens / answer",
+                    scale=alt.Scale(zero=True),
+                    axis=alt.Axis(format="~s", orient="right")),
+            color=color, strokeDash=dash, tooltip=tooltip,
+        )
+    )
+    return alt.layer(accuracy, tokens).resolve_scale(y="independent")
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Sections — one render_* per dashboard block, called from main(). Built section by
 # section against the spec in next-prompts.md.env.
@@ -303,10 +354,12 @@ def render_accuracy_matrix2(df: pd.DataFrame) -> None:
 
 
 def render_harness_evolution(df: pd.DataFrame) -> None:
-    """Per-question-type accuracy (or tokens) across harness versions; generator+writer=haiku.
+    """Per-question-type accuracy + avg tokens across harness versions; generator+writer=haiku.
 
-    The y-measure toggles between accuracy and avg tokens/answer (a metric switch, not a dual
-    axis — two arbitrary scales on one chart would invite false correlation).
+    Accuracy (left axis, %) and avg tokens/answer (right axis) share one chart on independent,
+    zero-anchored scales (the "normalized" dual axis) so a version's quality and its cost read
+    together per question type. Series = harness version. Replaces the earlier accuracy/tokens
+    metric toggle — read each line against its own axis; their proximity isn't a correlation.
     """
     keep = df[
         (df["generator_model_family"] == HAIKU_FAMILY)
@@ -321,7 +374,9 @@ def render_harness_evolution(df: pd.DataFrame) -> None:
     st.subheader("Harness-version evolution")
     st.caption(
         f"Generator + writer fixed to **{HAIKU_FAMILY}**, retrieval conditions pooled · "
-        f"series = harness version (present: {', '.join(versions) or '—'})."
+        f"series = harness version (present: {', '.join(versions) or '—'}).  \n"
+        "Accuracy (left axis, %, solid) and avg total tokens/answer (right axis, dashed) on "
+        "independent zero-anchored scales — read each line against its own axis."
     )
     if len(versions) < 2:
         st.info(
@@ -329,38 +384,39 @@ def render_harness_evolution(df: pd.DataFrame) -> None:
             "This chart turns into a comparison automatically once harness-v2/v3 runs are ingested."
         )
 
-    metric_label = st.radio(
-        "Y axis", list(METRICS), horizontal=True, key="harness_metric"
-    )
     cells = accuracy_cells(keep, row="harness_version", col="type_id")
     st.altair_chart(
-        series_line_chart(cells, "harness_version", "Harness version", METRICS[metric_label]),
+        series_dual_axis_chart(cells, "harness_version", "Harness version"),
         use_container_width=True,
     )
 
 
 def render_token_usage(df: pd.DataFrame) -> None:
-    """Avg total tokens per answered question, by question type × retriever (generator=haiku).
+    """Avg total tokens (right axis) + accuracy (left axis) per question type × retriever; gen=haiku.
 
-    Averaged per answer, never summed: a type with 8 questions shouldn't look costlier than a
-    4-question type just for having more of them — the per-question cost is what's comparable.
-    total tokens = input + output across the generator and (for SPARQL-gen) the writer.
-    Retriever is the series because it dominates token cost (closed-book is cheap, graph is not),
-    so pooling retrievers into one line would blend away the very thing worth seeing.
+    Cost and quality on one dual-axis chart, independent zero-anchored scales (the "normalized"
+    view). Tokens are averaged per answer, never summed: a type with 8 questions shouldn't look
+    costlier than a 4-question type just for having more of them — per-question cost is what's
+    comparable. total tokens = input + output across the generator and (for SPARQL-gen) the
+    writer. Retriever is the series because it dominates token cost (closed-book is cheap, graph
+    is not); each condition gets a solid accuracy line and a dashed token line — read each
+    against its own axis, the two aren't a correlation.
     """
     keep = df[
         (df["generator_model_family"] == HAIKU_FAMILY)
         & (~df["retriever"].isin(LEGACY_RETRIEVERS))
     ]
-    st.subheader("Token usage — avg total tokens per answered question")
+    st.subheader("Token usage & accuracy — per answered question")
     st.caption(
         f"Generator fixed to **{HAIKU_FAMILY}**, writers pooled, legacy retriever excluded.  \n"
-        "Total tokens = input + output across generator + SPARQL writer, **averaged per "
-        "answered question** so differing question counts per type don't distort the cost."
+        "Accuracy (left axis, %, solid) and total tokens = input + output across generator + "
+        "SPARQL writer (right axis, dashed), **averaged per answered question** so differing "
+        "question counts per type don't distort the comparison.  \n"
+        "_Dual axis: read each line against its own axis — proximity isn't correlation._"
     )
     cells = accuracy_cells(keep, row="display_label", col="type_id")
     st.altair_chart(
-        series_line_chart(cells, "display_label", "Retriever condition", TOKENS_METRIC),
+        series_dual_axis_chart(cells, "display_label", "Retriever condition"),
         use_container_width=True,
     )
 
