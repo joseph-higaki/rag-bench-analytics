@@ -189,45 +189,143 @@ def accuracy_heatmap(
 # section against the spec in next-prompts.md.env.
 # ──────────────────────────────────────────────────────────────────────────────
 def render_headline(df: pd.DataFrame) -> None:
-    """Top-of-page KPI strip: scored answers, overall accuracy, total tokens, total cost.
+    """Top-of-page KPI strip: pass rate, scored answers, cost per correct, best retriever.
 
-    All four are whole-dataset rollups (no filtering) so the page opens on the totals before
-    any slice. The token card is custom HTML (not st.metric) because the spec wants the input
-    and output subtotals shown small *above* the larger total — two values over one, which a
-    single metric can't render. Tokens reconcile by construction (total = input + output);
-    cost sums the pre-coalesced fact measure (unpriced models contribute 0, never fabricated).
+    Whole-dataset rollups (no filtering) so the page opens on the totals. Cost per correct =
+    Σ total_cost_usd / Σ passed — a ratio of two additive fact measures computed here at read
+    time (a ratio is non-additive, so it's never stored on the fact); guarded to '—' when nothing
+    passed (dividing by zero correct is undefined, not zero cost). Best retriever is the
+    highest-accuracy condition with legacy graph_neighborhood excluded — it's hidden from the
+    retriever comparison everywhere else (incl. the scatter below), so it must not win here. The
+    other three cards are still whole-dataset totals (they're totals, not a comparison).
     """
     scored = len(df)
     pass_rate = df["passed"].mean() if scored else 0.0
-    total_in = int(
-        df["generator_input_tokens"].fillna(0).sum()
-        + df["writer_input_tokens"].fillna(0).sum()
-    )
-    total_out = int(
-        df["generator_output_tokens"].fillna(0).sum()
-        + df["writer_output_tokens"].fillna(0).sum()
-    )
-    total_tokens = total_in + total_out
+    num_correct = int(df["passed"].sum())
     total_cost = df["total_cost_usd"].fillna(0).sum()
+    cost_per_correct = f"${total_cost / num_correct:,.4f}" if num_correct else "—"
 
-    def _mtok(v: int) -> str:  # tokens in millions, e.g. 4_620_000 -> "4.62M"
-        return f"{v / 1e6:,.2f}M"
+    ranked = df[~df["retriever"].isin(LEGACY_RETRIEVERS)]
+    if len(ranked):
+        ret_acc = ranked.groupby("display_label")["passed"].agg(correct="sum", n="size")
+        ret_acc["accuracy"] = ret_acc["correct"] / ret_acc["n"]
+        best_label = ret_acc["accuracy"].idxmax()
+        best_acc = f"{ret_acc['accuracy'].max():.1%} accuracy"
+    else:
+        best_label, best_acc = "—", ""
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Scored answers", f"{scored:,}")
-    c2.metric("Pass rate (overall accuracy)", f"{pass_rate:.1%}")
-    c3.markdown(
+    # 4th column gets extra width; its value is a long retriever label, not a number.
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 1.3])
+    c1.metric("Pass rate (overall accuracy)", f"{pass_rate:.1%}")
+    c2.metric("Scored answers", f"{scored:,}")
+    c3.metric(
+        "Cost per correct (USD)",
+        cost_per_correct,
+        help="Total cost ÷ correct answers. A correct answer costs more than an attempt because "
+        "wrong answers still cost money (cost/correct = cost/attempt ÷ accuracy).",
+    )
+    # Custom card (not st.metric): the value is a long retriever label that st.metric clips to one
+    # nowrap line — this mirrors the metric look but lets the name wrap and show in full.
+    c4.markdown(
         f"""
-        <div style="line-height:1.35">
-          <div style="font-size:0.8rem; opacity:0.6">
-            Input {_mtok(total_in)} &nbsp;·&nbsp; Output {_mtok(total_out)}
-          </div>
-          <div style="font-size:2.25rem; font-weight:600">{_mtok(total_tokens)}</div>
+        <div style="line-height:1.3">
+          <div style="font-size:0.875rem; opacity:0.6">Best retriever</div>
+          <div style="font-size:1.5rem; font-weight:600">{best_label}</div>
+          <div style="font-size:0.875rem; opacity:0.6">{best_acc}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    c4.metric("Total cost (USD)", f"${total_cost:,.2f}")
+
+
+def render_cost_per_correct_scatter(df: pd.DataFrame) -> None:
+    """Combo — cost per correct (left axis) and accuracy (right axis) by retriever, sized by latency.
+
+    Legacy graph_neighborhood is excluded (superseded by the _1hop/_2hop conditions); all generators
+    pooled. The two series share the plot area on *independent* y-axes — the honest reading of
+    "normalize accuracy onto the cost axis": accuracy keeps its own right-hand %% scale instead of
+    being silently rescaled into dollars (a single shared dollar axis would make accuracy unreadable).
+    Cost dots: y = Σ total_cost_usd / Σ passed, size = avg retrieval + avg generation latency (each
+    phase averaged over its non-null answers then summed; errors emit no latency and are skipped).
+    Accuracy: a dashed dot plot (passed/total). A zero-correct condition shows its accuracy dot but
+    no cost dot — cost/correct is undefined, not zero.
+    """
+    keep = df[~df["retriever"].isin(LEGACY_RETRIEVERS)]
+    by_ret = (
+        keep.groupby(["display_label", "sort_order"], as_index=False)
+        .agg(
+            total_cost=("total_cost_usd", "sum"),
+            correct=("passed", "sum"),
+            total=("passed", "size"),
+            avg_retrieval_ms=("retrieval_latency_ms", "mean"),
+            avg_generation_ms=("generation_latency_ms", "mean"),
+        )
+        .sort_values("sort_order")  # data order = x order, so the dashed line tracks left→right
+    )
+    by_ret["accuracy"] = by_ret["correct"] / by_ret["total"]
+    # .where(correct>0) makes the denominator NaN (not 0) when nothing passed, so the division
+    # yields NaN — no divide-by-zero warning, and the cost dot drops out via dropna below.
+    by_ret["cost_per_correct"] = by_ret["total_cost"] / by_ret["correct"].where(by_ret["correct"] > 0)
+    # closed-book has no retrieval phase (avg is NaN) -> treat as 0 so its dot still sizes on gen.
+    by_ret["avg_latency_ms"] = by_ret["avg_retrieval_ms"].fillna(0) + by_ret["avg_generation_ms"].fillna(0)
+
+    st.subheader("Cost per correct answer by retriever")
+    st.caption(
+        "All generators pooled · legacy graph_neighborhood excluded.  \n"
+        "Left axis = total cost ÷ correct answers (dot size = avg retrieval + generation latency); "
+        "right axis = accuracy (dashed), normalized to share the plot.  \n"
+        "Zero-correct conditions show accuracy only (cost per correct is undefined)."
+    )
+
+    _, ret_order = _retriever_axis(by_ret)
+    x_enc = alt.X(
+        "display_label:N", title="Retriever condition", sort=ret_order,
+        axis=alt.Axis(labelAngle=-45),
+    )
+    # One shared color scale across both layers → a single 2-entry legend (blue cost / orange accuracy).
+    series_color = alt.Color(
+        "series:N", title=None,
+        scale=alt.Scale(domain=["Cost per correct", "Accuracy"], range=["#4c78a8", "#f58518"]),
+    )
+
+    cost = (
+        alt.Chart(by_ret.dropna(subset=["cost_per_correct"]).assign(series="Cost per correct"))
+        .mark_circle(opacity=0.85)
+        .encode(
+            x=x_enc,
+            y=alt.Y("cost_per_correct:Q", title="Cost per correct answer (USD)",
+                    axis=alt.Axis(format="$,.4f")),
+            size=alt.Size("avg_latency_ms:Q", title="Avg latency (ms)",
+                          scale=alt.Scale(range=[100, 1200])),
+            color=series_color,
+            tooltip=[
+                alt.Tooltip("display_label:N", title="Retriever"),
+                alt.Tooltip("cost_per_correct:Q", title="Cost / correct", format="$,.4f"),
+                alt.Tooltip("total_cost:Q", title="Total cost", format="$,.4f"),
+                alt.Tooltip("correct:Q", title="Correct"),
+                alt.Tooltip("total:Q", title="Answers"),
+                alt.Tooltip("avg_latency_ms:Q", title="Avg latency (ms)", format=",.0f"),
+            ],
+        )
+    )
+    accuracy = (
+        alt.Chart(by_ret.assign(series="Accuracy"))
+        .mark_line(strokeDash=[4, 4], point=True)
+        .encode(
+            x=x_enc,
+            y=alt.Y("accuracy:Q", title="Accuracy", scale=alt.Scale(domain=[0, 1]),
+                    axis=alt.Axis(format=".0%")),
+            color=series_color,
+            tooltip=[
+                alt.Tooltip("display_label:N", title="Retriever"),
+                alt.Tooltip("accuracy:Q", title="Accuracy", format=".0%"),
+                alt.Tooltip("correct:Q", title="Correct"),
+                alt.Tooltip("total:Q", title="Answers"),
+            ],
+        )
+    )
+    chart = alt.layer(cost, accuracy).resolve_scale(y="independent").properties(height=380)
+    st.altair_chart(chart, use_container_width=True)
 
 
 def render_ground_truth(dim_q: pd.DataFrame) -> None:
@@ -337,7 +435,7 @@ def render_accuracy_matrix2(df: pd.DataFrame) -> None:
 
 
 def render_latency_split(df: pd.DataFrame) -> None:
-    """DRAFT — retrieval vs generation latency per retriever condition (generator=haiku).
+    """Retrieval vs generation latency per retriever condition (generator=haiku).
 
     Stacked bars split each condition's avg wall-clock into its two phases: retrieval (the
     retriever fetching context) and generation (the LLM answering). Generator is held fixed
@@ -350,11 +448,11 @@ def render_latency_split(df: pd.DataFrame) -> None:
         (df["generator_model_family"] == HAIKU_FAMILY)
         & (~df["retriever"].isin(LEGACY_RETRIEVERS))
     ]
-    st.subheader("🚧 DRAFT · Latency — retrieval vs generation by retriever condition")
+    st.subheader("Latency — retrieval vs generation by retriever condition")
     st.caption(
         f"Generator fixed to **{HAIKU_FAMILY}**, legacy retriever excluded · stacked bar = "
         "avg retrieval + avg generation latency (ms) per condition.  \n"
-        "_Draft for review — phases averaged over answers that emitted latency (errors skipped)._"
+        "_Phases averaged over answers that emitted latency (errors skipped)._"
     )
 
     by_cond = keep.groupby(["display_label", "sort_order"], as_index=False).agg(
@@ -444,8 +542,8 @@ def render_pricing_reference(dim_pricing: pd.DataFrame) -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="Biomedical RAG Bench — Analytics v2", layout="wide")
-    st.title("Biomedical RAG Bench — Retriever Analytics v2")
+    st.set_page_config(page_title="Biomedical RAG Bench — Analytics", layout="wide")
+    st.title("Biomedical RAG Bench — Retriever Analytics")
 
     dim_q = load_mart("dim_question")
     dim_pricing = load_mart("dim_token_pricing")
@@ -453,13 +551,15 @@ def main() -> None:
 
     render_headline(df)
     st.divider()
-    render_ground_truth(dim_q)
+    render_cost_per_correct_scatter(df)
     st.divider()
     render_accuracy_matrix1(df)
     st.divider()
     render_accuracy_matrix2(df)
     st.divider()
     render_latency_split(df)
+    st.divider()
+    render_ground_truth(dim_q)
     st.divider()
     render_pricing_reference(dim_pricing)
 

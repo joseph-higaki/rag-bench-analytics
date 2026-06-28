@@ -60,9 +60,8 @@ flowchart LR
   runs it without Airflow.
 
 ## Dashboard Screenshot
+![alt text](rag-bench-analytics-dashboard-screenshot-draftv2-01.png)
 
-![alt text](rag-bench-analytics-dashboard-screenshot-draftv2-01.png)  
- 
  ![alt text](rag-bench-analytics-dashboard-screenshot-draftv2-03.png)
  
  ![alt text](rag-bench-analytics-dashboard-screenshot-draftv2-02.png)
