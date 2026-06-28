@@ -1,28 +1,23 @@
 # rag-bench-analytics
 
-The **analytics consumer** for [`biomedical-rag-bench`](../biomedical-rag-bench). The
-benchmark *produces* evaluation results; this repo *turns accumulated results into a
-dimensional model and a dashboard*.
+The **analytics consumer** for [`biomedical-rag-bench`](https://github.com/joseph-higaki/biomedical-rag-bench). 
 
-> **Scope & coupling.** The pipeline machinery (extract/load, the star schema, dbt,
-> serving) is domain-agnostic, but this repo is **purpose-built for `biomedical-rag-bench`**:
-> it's bound to that benchmark's output *contract* (the run-file shape, `traversal_info`
-> mechanisms) and ships seeds specific to it (retriever families, the hetionet/question
-> taxonomy). It consumes those files from object storage and **never imports the benchmark's
-> code** — the coupling is to the contract and the domain, not the internals.
+> An evolving evaluation harness for retrieval-augmented generation over biomedical
+> nowledge [Hetionet](https://het.io/). It compares retrieval strategies: graph traversal and graph
+> query vs. vector similarity, others to come. All under a shared evaluation contract.
+> 
+> The benchmark grows by adding retriever conditions; the eval harness, question set,
+> generator interface, and telemetry schema are shared across all conditions and evolve
+> under additive-only rules.
 
-The benchmark compares **retrievers** for biomedical question answering: the generator
-LLM is fixed per run and ground truth comes from graph traversal (never an LLM), so the
-**compared variable is the retriever** (closed-book / vector / graph-neighborhood /
-graph-SPARQL-gen). This repo answers: *which retriever wins, at what cost, at what
-latency, on which question types?*
+This repo answers: which retriever wins, at what cost, at what latency, on which question types?
 
 ## Architecture
 
 <details open>
 <summary><b>Image diagram</b></summary>
 
-![alt text](<rag bench analytics data pipeline architecture.png>)
+![alt text](<_resources/README.md/rag bench analytics data pipeline architecture.png>)
 
 </details>
 
@@ -31,13 +26,17 @@ latency, on which question types?*
 
 ```mermaid
 flowchart LR
-    S["S3 / MinIO<br/>run files + questions.jsonl"]
-    I["ingestion<br/>extract + load"]
+    BENCH["biomedical-rag-bench<br/>telemetry runs (JSON)"]
+    PRICE["portkey-ai/models<br/>pricing catalog"]
+    S["S3 / MinIO<br/>object storage"]
+    I["ingestion<br/>object storage → raw"]
     R["Postgres<br/>raw.* (JSONB, as-is)"]
     D["dbt<br/>staging → intermediate → marts<br/>EXPLODE traversal_info"]
     M["marts<br/>star + cost"]
     DASH["dashboard<br/>Streamlit (direct, read-only)"]
 
+    BENCH --> S
+    PRICE --> S
     S --> I --> R --> D --> M --> DASH
 
     AF(["Airflow DAG (optional)"])
@@ -49,26 +48,27 @@ flowchart LR
 
 
 
-- **Extract/Load** (`ingestion/`): pull run files from object storage, land them in a
-  `raw` schema as JSONB, as-is. Idempotent, keyed by `run_id`. No transformation.
-- **Transform** (`dbt/`): `staging → intermediate → marts`. The schema morph lives here.
-- **Serve** (`dashboard/`): Streamlit reads the **marts schema directly** via a
-  least-privilege read-only role (`marts_reader`) — never raw/staging, never as the
-  warehouse owner. (Parquet→S3 for Streamlit Community Cloud is a documented, unbuilt
-  fallback; see ADR-001.)
-- **Orchestrate** (`airflow/`): a DAG runs the same chain. Optional — `make pipeline`
-  runs it without Airflow.
+- **Data Sources** — two inputs, no compute:
+  - telemetry eval runs — JSON from [`biomedical-rag-bench`](https://github.com/joseph-higaki/biomedical-rag-bench)
+  - model pricing — the [`portkey-ai/models`](https://github.com/portkey-ai/models) catalog
+- **Ingestion** (`ingestion/`): read run files + the pricing snapshot from object storage
+  (MinIO/S3), land them in the `raw` schema as JSONB, as-is. Idempotent, keyed by `run_id`.
+- **Transform** (`dbt/`): `staging → intermediate → marts`
+  - staging — flatten, type, name; explode `traversal_info`; cents → USD/Mtok
+  - intermediate — set grain, join questions, apply pricing
+  - marts — the star schema (surrogate keys, fact measures)
+- **Visualization** (`dashboard/`): Streamlit reads the **marts schema directly** via a
+  read-only role (`marts_reader`) — never raw/staging.
 
 ## Dashboard Screenshot
-![alt text](rag-bench-analytics-dashboard-screenshot-draftv2-01.png)
 
- ![alt text](rag-bench-analytics-dashboard-screenshot-draftv2-03.png)
- 
- ![alt text](rag-bench-analytics-dashboard-screenshot-draftv2-02.png)
+![alt text](<_resources/README.md/rag bench analytics report screenshot 3.png>)
 
+ ![alt text](<_resources/README.md/rag bench analytics report screenshot 1.png>)
 
+  ![alt text](<_resources/README.md/rag bench analytics report screenshot 2.png>)
 
-## The source contract (what actually arrives)
+## The source contract
 
 The benchmark lands **one file pair per run**, a shared question bank, and a corpus profile
 per build:
@@ -80,24 +80,9 @@ per build:
 | `questions.jsonl` | shared | question type, hop-count, ground truth, template |
 | `<corpus_build_id>.json` | one per corpus build | graph/vector size metrics; landed under the shared `reference/` prefix, joined to `dim_corpus` |
 
-`traversal_info` is **schema-on-read**: its keys vary by retrieval mechanism (`dense`,
-`neighborhood`, `sparqlgen`) and is empty `{}` on closed-book and older/error records.
-The contract is **append-only and versioned** — the staging layer validates it and
-tolerates unknown keys; it never assumes a frozen schema.
-
 ### Source contract, visualized
 
-A containment diagram + field tables, with a *presence matrix* for the two polymorphic
-objects (`traversal_info`, `judge_details`): which mechanism emits each key (`✓` / `·`)
-plus a `→ star as` column for where it routes in the morph — expressing the schema-on-read
-variance ER notation can't, without folding routing into per-attribute notes. Entity names
-map to files: `RUN_MANIFEST` = `<run_id>.manifest.json`, `SCORED_ANSWER` =
-`<run_id>.jsonl`, `QUESTION` = `questions.jsonl`, `CORPUS_PROFILE` =
-`<corpus_build_id>.json`.
-
-> **Authoritative contract:** the benchmark's `eval/README.md` + `retrievers/README.md`.
-> The tables and matrix below are *this repo's read* of that contract for the morph (note
-> the `→ star as` column) — a derived view, not the spec.
+> **Authoritative contract:** the benchmark's   [`eval/README.md`](https://github.com/joseph-higaki/biomedical-rag-bench/blob/main/eval/README.md) + [`retrievers/README.md`](https://github.com/joseph-higaki/biomedical-rag-bench/blob/main/retrievers/README.md)
 
 ```mermaid
 classDiagram
@@ -245,26 +230,21 @@ smoke** (no endpoint serving it) — carried as null, never fabricated.
 
 Grain of the fact: **one scored answer = run × question × retriever condition.**
 
-_The diagram mirrors the implemented marts — the dbt models and the `_marts.yml` contract
-follow the ADR-003 field-naming convention._
-
-**Seven** conformed dimensions around one fact. Every dimension join is a hashed **surrogate**
-key (`*_sk`) computed from the *same* column list in fact and dim, so they join exactly —
-uniform single-column joins even for the composite-key dims (`dim_generator`,
-`dim_retriever_cond`). The fact carries the surrogate PK + surrogate FKs **only**;
-natural/business keys live in their dimension and are never copied into the fact (ADR-003).
-Every fact column is shown; the contract enforcing their types is
-`dbt/models/marts/_marts.yml`. `sparse` marks columns null where a mechanism doesn't produce them.
-
 ```mermaid
 erDiagram
-    DIM_RUN ||--o{ FCT_SCORED_ANSWER : run_sk
-    DIM_QUESTION ||--o{ FCT_SCORED_ANSWER : question_sk
+    %% Dim-first relationships render above the fact; fact-first ones render below it,
+    %% so FCT_SCORED_ANSWER sits between two rows of dims (see the layout note below the
+    %% diagram). Cardinality is identical either way — only the written order is flipped.
+    DIM_RUN            ||--o{ FCT_SCORED_ANSWER : run_sk
+    DIM_QUESTION       ||--o{ FCT_SCORED_ANSWER : question_sk
+    DIM_GENERATOR      ||--o{ FCT_SCORED_ANSWER : generator_sk
     DIM_RETRIEVER_COND ||--o{ FCT_SCORED_ANSWER : retriever_cond_sk
-    DIM_GENERATOR ||--o{ FCT_SCORED_ANSWER : generator_sk
-    DIM_WRITER ||--o{ FCT_SCORED_ANSWER : writer_sk
-    DIM_SCORING ||--o{ FCT_SCORED_ANSWER : scoring_sk
-    DIM_CORPUS ||--o{ FCT_SCORED_ANSWER : corpus_sk
+
+    FCT_SCORED_ANSWER }o--|| DIM_WRITER         : writer_sk
+    FCT_SCORED_ANSWER }o--|| DIM_SCORING        : scoring_sk
+    FCT_SCORED_ANSWER }o--|| DIM_CORPUS         : corpus_sk
+    FCT_SCORED_ANSWER }o--o| DIM_TOKEN_PRICING  : generator_pricing_sk
+    FCT_SCORED_ANSWER }o--o| DIM_TOKEN_PRICING  : writer_pricing_sk
 
     FCT_SCORED_ANSWER {
         text scored_answer_sk PK "surrogate primary key, grain run x question"
@@ -275,6 +255,8 @@ erDiagram
         text writer_sk FK "surrogate FK"
         text scoring_sk FK "surrogate FK"
         text corpus_sk FK "surrogate FK"
+        text generator_pricing_sk FK "surrogate FK → dim_token_pricing, null when unpriced"
+        text writer_pricing_sk FK "surrogate FK → dim_token_pricing, null when unpriced"
         numeric score
         boolean is_passed
         boolean is_judged
@@ -314,10 +296,15 @@ erDiagram
         text question_sk PK "surrogate primary key"
         text question_id "natural key"
         text type_id
+        text type_family "seed rollup"
+        text type_display_label "seed label"
+        text type_description "seed"
         text template_id
         text scoring
         integer question_hop_count
         integer num_seed_entities
+        text question_text "the prompt, verbatim"
+        text ground_truth_answer_text "readable; array answers joined ', '"
     }
     DIM_RETRIEVER_COND {
         text retriever_cond_sk PK "surrogate primary key"
@@ -328,6 +315,7 @@ erDiagram
         text retriever_family
         boolean is_graph
         text display_label
+        integer sort_order "seed display order"
     }
     DIM_GENERATOR {
         text generator_sk PK "surrogate primary key"
@@ -340,6 +328,7 @@ erDiagram
     DIM_WRITER {
         text writer_sk PK "surrogate primary key"
         text writer_model "natural key"
+        text writer_model_family "snapshot stripped; null for null-writer"
         numeric writer_temperature
     }
     DIM_SCORING {
@@ -367,6 +356,19 @@ erDiagram
         text embed_model "FD on corpus, not retriever"
         timestamptz corpus_measured_at
     }
+    DIM_TOKEN_PRICING {
+        text pricing_sk PK "surrogate primary key"
+        text provider
+        text model_resolved "natural key"
+        numeric input_usd_per_mtok
+        numeric output_usd_per_mtok
+        numeric cache_read_usd_per_mtok
+        numeric cache_write_usd_per_mtok
+        text rate_unit "usd_per_mtok"
+        date effective_date
+        text source_note
+        text pricing_source "portkey | override"
+    }
 ```
 
 - `fct_scored_answer` — surrogate PK + surrogate FKs to all dims + measures: `score`,
@@ -376,8 +378,10 @@ erDiagram
   `total_cost_usd`). Sparse columns are expected (null where a mechanism doesn't produce
   them). Retriever *knobs* (`top_k`, `neighborhood_hops`) live on
   `dim_retriever_cond`, not the fact. The marts contract enforces column types — the dashboard binds to them.
-- Seven dimensions: `dim_run`, `dim_question`, `dim_retriever_cond` (the compared variable),
-  `dim_generator`, `dim_writer` (the SPARQL-writer LLM config), `dim_scoring`, `dim_corpus`.
+- Eight dimensions: `dim_run`, `dim_question`, `dim_retriever_cond` (the compared variable),
+  `dim_generator`, `dim_writer` (the SPARQL-writer LLM config), `dim_scoring`, `dim_corpus`,
+  and `dim_token_pricing` (the conformed pricing catalog — the fact carries nullable
+  `generator_pricing_sk` / `writer_pricing_sk` into it, null = unpriced model; ADR-003).
 - The **cost-per-token** prices come from an *external* source — the [Portkey-AI/models]
   (https://github.com/Portkey-AI/models) catalog, landed as a snapshot like any other input
   (`reference/pricing/<provider>.json` → `raw.model_pricing` → `stg_model_pricing_portkey`),
@@ -385,9 +389,9 @@ erDiagram
   Portkey structurally can't price (local Ollama = $0). Cost = tokens × price for both the
   answering LLM and the SPARQL-writer LLM; unpriced models yield NULL cost (never fabricated).
 
-### The schema morph
+### The schema transformation
 
-The transform lives in staging. Note the fan-out: `raw.scored_answer` feeds **two** staging
+The transform lives in staging. `raw.scored_answer` feeds **two** staging
 models — the top-level flatten (`stg_scored_answers`) and the `traversal_info` explode
 (`stg_traversal`) — which rejoin in intermediate alongside the flattened pricing snapshot:
 
@@ -420,7 +424,7 @@ flowchart LR
 
     OVR[["pricing override + alias seeds<br/>(Ollama $0, identity map)"]]
     INT[int_scored_answers_enriched]
-    M["marts star<br/>fct + 7 dims"]
+    M["marts star<br/>fct + 8 dims"]
 
     f1 --> r1
     f2 --> r2
@@ -457,44 +461,29 @@ The field-level routing:
 | `mechanism`, `writer_model` + `writer_temperature` | dim attributes (`dim_retriever_cond` / `dim_writer`) |
 | `sparql` text, `sources`, `endpoint` | kept in raw provenance, **dropped from the star** |
 
-## Quickstart (local, offline, no AWS)
+## Quickstart (local)
 
 ```bash
 make setup       # venv + deps + .env + dbt profile
 make pipeline    # up (postgres+minio) → seed → ingest → dbt build
-make dashboard   # Streamlit v1 at :8501, v2 at :8502 (direct-connect to marts)
+make dashboard   # Streamlit :8502 (direct-connect to marts)
 ```
 
 `make pipeline` is the offline reproducibility check: `docker compose` + the committed
 `ingestion_sample/` fixtures run the whole chain with no AWS account. Fixtures are
 organized as dated **run batches** (`ingestion_sample/<batch>/`, discovered recursively)
-plus a **`reference/`** dir holding the shared, non-run-scoped inputs (`questions.jsonl`
-+ corpus profiles); see ADR-007.
+plus a **`reference/`** dir holding the shared, non-run-scoped inputs (`questions.jsonl`+ corpus profiles); see ADR-007.
 
 Useful individual targets: `make up`, `make seed`, `make ingest`, `make dbt`,
 `make test`, `make lint`, `make parse`, `make airflow`. Run `make help`.
 
-## Local vs cloud
-
-Same dbt models everywhere; only the **target** and **env vars** differ (never the model
-code). Local uses Postgres + MinIO in `docker compose`; cloud uses RDS `t4g.micro` + real
-S3, selected by `DBT_TARGET=cloud`. See `infra/` for the cheapest-viable AWS skeleton and
-the cost discipline behind each component (notably: **no MWAA**, **no Aurora**).
 
 ## CI
 
 `.github/workflows/ci.yml` runs the **same models** end-to-end on the fixtures against
 ephemeral Postgres + MinIO service containers: lint → unit tests → seed → ingest →
-`dbt build` (run + tests + contracts) → idempotency test. Fully offline, no AWS.
+`dbt build` (run + tests + contracts) → idempotency test. 
 
-## Verification status
-
-Validated in this repo: the ingestion logic against all **91 runs / 4,041 records / 2 corpus
-profiles** of the real fixtures (including the empty-`traversal_info`, error-row, and
-null-graph-count smoke edge cases), the unit suite, `ruff`, and `dbt parse`
-(Jinja/refs/contracts). The full `dbt build` run
-against Postgres + MinIO — plus the dashboard's direct read-only-role read of the marts
-schema — is exercised by `make pipeline` and CI (both require Docker).
 
 ## Repo layout
 
