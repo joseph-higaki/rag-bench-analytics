@@ -2,6 +2,6 @@ retriever,retriever_family,is_graph,display_label,sort_order
 closed_book,closed_book,false,Closed book (no retrieval),1
 vector,vector,false,Dense vector (Chroma),2
 graph_neighborhood,graph_neighborhood,true,Graph neighborhood (legacy),3
-graph_neighborhood_1hop,graph_neighborhood,true,Graph neighborhood (1 hop),4
-graph_neighborhood_2hop,graph_neighborhood,true,Graph neighborhood (2 hop),5
-graph_sparqlgen,graph_sparqlgen,true,Graph SPARQL generation,6
+graph_neighborhood_1hop,graph_neighborhood,true,1 hop Graph neighborhood,4
+graph_neighborhood_2hop,graph_neighborhood,true,2 hop Graph neighborhood,5
+graph_sparqlgen,graph_sparqlgen,true,Text to SPARQL,6
