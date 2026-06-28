@@ -62,11 +62,12 @@ flowchart LR
 
 ## Dashboard Screenshot
 
-![alt text](<_resources/README.md/rag bench analytics report screenshot 3.png>)
 
  ![alt text](<_resources/README.md/rag bench analytics report screenshot 1.png>)
 
   ![alt text](<_resources/README.md/rag bench analytics report screenshot 2.png>)
+
+![alt text](<_resources/README.md/rag bench analytics report screenshot 3.png>)
 
 ## The source contract
 
